@@ -1,0 +1,63 @@
+<svg width="960" height="350" viewBox="0 0 960 350" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Benchmark table: parsing and building three representative property list documents">
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="1.6" fill="#d0d7de" />
+    </pattern>
+    <filter id="cardShadow" x="-8%" y="-8%" width="116%" height="124%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0d1117" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Dotted backdrop -->
+  <rect width="960" height="350" rx="12" fill="#f6f8fa" />
+  <rect width="960" height="350" rx="12" fill="url(#dots)" />
+
+  <!-- Terminal card -->
+  <rect x="40" y="36" width="880" height="278" rx="16" fill="#0d1117" stroke="#30363d" filter="url(#cardShadow)" />
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+    <!-- Header row -->
+    <g fill="#e6edf3" font-weight="bold">
+      <text x="88" y="86">Document</text>
+      <text x="300" y="86">Size</text>
+      <text x="408" y="86">Parse</text>
+      <text x="516" y="86">Build</text>
+      <text x="624" y="86">Parse speed</text>
+      <text x="768" y="86">Build speed</text>
+    </g>
+    <line x1="64" y1="104" x2="896" y2="104" stroke="#30363d" />
+
+    <!-- auth response -->
+    <g fill="#e6edf3">
+      <text x="88" y="140">auth response</text>
+      <text x="300" y="140">1.5 KiB</text>
+      <text x="408" y="140">3.4 &#181;s</text>
+      <text x="516" y="140">1.1 &#181;s</text>
+      <text x="624" y="140" fill="#3fb950">430 MiB/s</text>
+      <text x="768" y="140" fill="#3fb950">1.2 GiB/s</text>
+    </g>
+
+    <!-- device list -->
+    <g fill="#e6edf3">
+      <text x="88" y="180">device list &#215;500</text>
+      <text x="300" y="180">179 KiB</text>
+      <text x="408" y="180">0.72 ms</text>
+      <text x="516" y="180">0.42 ms</text>
+      <text x="624" y="180" fill="#3fb950">240 MiB/s</text>
+      <text x="768" y="180" fill="#3fb950">420 MiB/s</text>
+    </g>
+
+    <!-- provisioning profile -->
+    <g fill="#e6edf3">
+      <text x="88" y="220">profile (binary)</text>
+      <text x="300" y="220">658 KiB</text>
+      <text x="408" y="220">0.71 ms</text>
+      <text x="516" y="220">79 &#181;s</text>
+      <text x="624" y="220" fill="#3fb950">900 MiB/s</text>
+      <text x="768" y="220" fill="#3fb950">7.9 GiB/s</text>
+    </g>
+
+    <line x1="64" y1="248" x2="896" y2="248" stroke="#30363d" />
+    <text x="88" y="282" fill="#8b949e">Apple M5 Max &#183; Node.js 24 &#183; single thread &#183; pnpm bench</text>
+  </g>
+</svg>
