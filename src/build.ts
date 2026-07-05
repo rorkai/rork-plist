@@ -224,25 +224,34 @@ class Builder {
    * Serializes a plain object as a `<dict>` element.
    *
    * Keys whose value is `undefined` are omitted, matching `JSON.stringify`;
-   * a dictionary with no remaining keys collapses to `<dict/>`. Reading
-   * through the index signature yields `PlistValue | undefined` under
-   * `noUncheckedIndexedAccess`, which the `undefined` filter narrows away
-   * before serialization.
+   * a dictionary with no remaining keys (empty, or every value `undefined`)
+   * collapses to `<dict/>`. The opening tag is emitted lazily on the first
+   * kept key so the omission adds only a comparison per key — no filtered
+   * copy of the key list and no second pass — keeping the common
+   * no-`undefined` document allocation-free. Reading through the index
+   * signature yields `PlistValue | undefined` under `noUncheckedIndexedAccess`,
+   * which the `undefined` check narrows away before serialization.
    */
   private appendDict(value: PlistDictionary, path: string, depth: number): void {
     const record: Record<string, PlistValue | undefined> = value;
-    const keys = Object.keys(record).filter((key) => record[key] !== undefined);
-    if (keys.length === 0) {
-      this.appendLine(depth, "<dict/>");
-      return;
-    }
-    this.appendLine(depth, "<dict>");
-    for (const key of keys) {
+    let opened = false;
+    for (const key of Object.keys(record)) {
       const entryValue = record[key];
+      if (entryValue === undefined) {
+        continue;
+      }
+      if (!opened) {
+        this.appendLine(depth, "<dict>");
+        opened = true;
+      }
       this.appendLine(depth + 1, `<key>${escapeText(key, path)}</key>`);
       this.appendValue(entryValue, `${path}.${key}`, depth + 1);
     }
-    this.appendLine(depth, "</dict>");
+    if (opened) {
+      this.appendLine(depth, "</dict>");
+    } else {
+      this.appendLine(depth, "<dict/>");
+    }
   }
 
   /**
