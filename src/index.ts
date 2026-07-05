@@ -21,5 +21,6 @@ export { buildPlist, type BuildPlistOptions } from "./build";
 export { PlistBuildError, PlistParseError, type PlistErrorPosition } from "./errors";
 export { parsePlist } from "./parse";
 export { parseBinaryPlist } from "./parse-binary";
+export { parseOpenStepPlist } from "./parse-openstep";
 export type { ParsePlistOptions } from "./parse-options";
 export type { PlistArray, PlistDictionary, PlistValue } from "./types";

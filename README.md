@@ -47,10 +47,10 @@ pnpm add rork-plist
 
 ### `parsePlist(input, options?)`
 
-Parses a property list into JavaScript values. `input` is `string | Uint8Array`:
+Parses a property list of any format into JavaScript values. `input` is `string | Uint8Array`:
 
-- a **string** is parsed as XML;
-- a **`Uint8Array`** is parsed as binary when it carries the `bplist00` magic, and otherwise decoded as XML text — UTF-8, or UTF-16 when a byte order mark announces it, the same encoding selection the reference parser applies.
+- a **`Uint8Array`** is parsed as binary when it carries the `bplist00` magic, and otherwise decoded as text — UTF-8, or UTF-16 when a byte order mark announces it, the same encoding selection the reference parser applies;
+- a **string**, or decoded text, is parsed as XML when its first significant character is `<`, and as OpenStep otherwise — the same dispatch the reference parser applies, including reading `<0fbd77>` as an OpenStep data root rather than markup.
 
 XML accepts complete documents (XML declaration, DOCTYPE, `<plist>` wrapper) as well as bare root elements.
 
@@ -58,7 +58,7 @@ XML accepts complete documents (XML declaration, DOCTYPE, `<plist>` wrapper) as 
 import { parsePlist, PlistParseError } from "rork-plist";
 
 try {
-  const value = parsePlist(input); // XML string, or bytes of either format
+  const value = parsePlist(input); // text or bytes of any plist format
 } catch (error) {
   if (error instanceof PlistParseError) {
     console.error(error.message); // "unknown element <widget> (line 4, column 2)"
@@ -69,9 +69,13 @@ try {
 
 ### `parseBinaryPlist(bytes, options?)`
 
-Parses a binary (`bplist00`) property list explicitly, skipping the format sniffing `parsePlist` does. Use it when you already know the input is binary; otherwise `parsePlist` handles both.
+Parses a binary (`bplist00`) property list explicitly, skipping the format sniffing `parsePlist` does. Use it when you already know the input is binary; otherwise `parsePlist` handles every format.
 
-Both parsers accept the same options:
+### `parseOpenStepPlist(text, options?)`
+
+Parses an OpenStep (NeXTSTEP) text property list explicitly — the legacy format of Xcode's `project.pbxproj` and `.strings` localization files. The format is untyped, so leaves parse as strings (quoted or bare) or `Uint8Array` (`<hex>` data); strings-file documents, including the bare `"key";` shorthand, parse as dictionaries. The reference implementation reads OpenStep but cannot write it, and this library mirrors that.
+
+All parsers accept the same options:
 
 | Option     | Default  | Description                                                                                                                                                                     |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -132,7 +136,9 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 
 Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS. Beyond the fixtures, `pnpm corpus` sweeps the local machine's real property lists — tens of thousands of system, framework, and application files from bytes to tens of megabytes — parsing every one and cross-validating a stratified sample against `plutil` value by value.
 
-- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects binary vs. XML from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
+- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
+
+- **OpenStep plists** — the format of Xcode's `project.pbxproj` and of `.strings` localization files — parse via `parsePlist` or `parseOpenStepPlist`. The grammar follows the reference parser, probed case by case: single- and double-quoted strings, the C escape set, octal escapes mapped through the NeXTSTEP encoding, raw `\U` code units, non-nesting comments, whitespace-separated hex data groups, the bare-key `"key";` shorthand, and brace-less strings-file documents. The format is untyped, so leaves parse as strings or data. Writing OpenStep is unsupported in the platform tooling and unsupported here.
 
 - **64-bit integers.** `<integer>` covers the full signed/unsigned 64-bit window `[-(2^63), 2^64 - 1]`; values beyond that fail to parse and to build. Values that exceed `Number.MAX_SAFE_INTEGER` parse as `bigint`, so identifiers and tokens never lose precision silently. Hexadecimal spellings (`0x1F`, `-0x10`) parse like the reference implementation.
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.
@@ -144,26 +150,29 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 
 ## Performance
 
-`rork-plist` is measured against the most-used plist packages on npm — [`plist`](https://www.npmjs.com/package/plist) (XML + binary), [`@expo/plist`](https://www.npmjs.com/package/@expo/plist) (XML), and [`bplist-parser`](https://www.npmjs.com/package/bplist-parser) / [`bplist-creator`](https://www.npmjs.com/package/bplist-creator) (binary) — on three representative documents, using fixtures canonicalized by Apple's own `plutil` so no parser reads its own writer's output. It is the fastest across every operation and format, with zero dependencies.
+`rork-plist` is measured against the most-used plist packages on npm — [`plist`](https://www.npmjs.com/package/plist) (XML, binary, and OpenStep), [`@expo/plist`](https://www.npmjs.com/package/@expo/plist) (XML), and [`bplist-parser`](https://www.npmjs.com/package/bplist-parser) / [`bplist-creator`](https://www.npmjs.com/package/bplist-creator) (binary) — on three representative documents, using fixtures canonicalized by Apple's own `plutil` so no parser reads its own writer's output. It is the fastest across every operation and format, with zero dependencies.
 
 <p align="center">
-  <img src="assets/performance.svg" alt="Benchmark chart comparing rork-plist with the plist, @expo/plist, bplist-parser, and bplist-creator packages. Bars show time relative to rork-plist as the geometric mean over three representative documents. Parsing XML, plist takes 5.4 times as long and @expo/plist 3.1 times. Building XML, plist takes 12.4 times as long and @expo/plist 4.7 times. Parsing binary in aliasing mode, plist takes 1.3 times as long and bplist-parser 3.3 times. Building binary, plist takes 1.6 times as long and bplist-creator 3.8 times." width="880" />
+  <img src="assets/performance.svg" alt="Benchmark chart comparing rork-plist with the plist, @expo/plist, bplist-parser, and bplist-creator packages. Bars show time relative to rork-plist as the geometric mean over three representative documents. Parsing XML, plist takes 5.8 times as long and @expo/plist 3.4 times. Building XML, plist takes 12.4 times as long and @expo/plist 4.8 times. Parsing OpenStep, plist takes 4.3 times as long. Parsing binary in aliasing mode, plist takes 1.3 times as long and bplist-parser 3.3 times. Building binary, plist takes 1.6 times as long and bplist-creator 3.8 times." width="880" />
 </p>
 
-| Operation    | Document                | `rork-plist`           | `plist`         | `@expo/plist`  | `bplist-parser` / `-creator` |
-| ------------ | ----------------------- | ---------------------- | --------------- | -------------- | ---------------------------- |
-| parse XML    | auth response (1.6 KiB) | **4.2 µs**             | 28.1 µs (6.7×)  | 14.3 µs (3.4×) | —                            |
-| parse XML    | device list (179 KiB)   | **0.66 ms**            | 9.25 ms (13.9×) | 4.06 ms (6.1×) | —                            |
-| parse XML    | profile (677 KiB)       | **1.02 ms**            | 1.67 ms (1.7×)  | 1.43 ms (1.4×) | —                            |
-| build XML    | auth response           | **1.2 µs**             | 12.0 µs (10.4×) | 8.8 µs (7.7×)  | —                            |
-| build XML    | device list             | **0.40 ms**            | 2.83 ms (7.1×)  | 2.90 ms (7.3×) | —                            |
-| build XML    | profile                 | **83 µs**              | 2.17 ms (26.0×) | 158 µs (1.9×)  | —                            |
-| parse binary | auth response (0.9 KiB) | **0.78 µs** (1.0 µs †) | 0.85 µs (1.1×)  | —              | 2.5 µs (3.2×)                |
-| parse binary | device list (57 KiB)    | **0.20 ms**            | 0.34 ms (1.7×)  | —              | 0.87 ms (4.4×)               |
-| parse binary | profile (493 KiB)       | **1.0 µs** (19.6 µs †) | 1.3 µs (1.3×)   | —              | 2.6 µs (2.6×)                |
-| build binary | auth response           | **2.0 µs**             | 2.8 µs (1.4×)   | —              | 9.5 µs (4.7×)                |
-| build binary | device list             | **0.49 ms**            | 0.69 ms (1.4×)  | —              | 2.58 ms (5.2×)               |
-| build binary | profile                 | **23 µs**              | 44.6 µs (1.9×)  | —              | 49.9 µs (2.2×)               |
+| Operation      | Document                | `rork-plist`           | `plist`         | `@expo/plist`  | `bplist-parser` / `-creator` |
+| -------------- | ----------------------- | ---------------------- | --------------- | -------------- | ---------------------------- |
+| parse XML      | auth response (1.6 KiB) | **4.1 µs**             | 27.7 µs (6.7×)  | 14.5 µs (3.5×) | —                            |
+| parse XML      | device list (179 KiB)   | **0.62 ms**            | 9.58 ms (15.5×) | 4.28 ms (6.9×) | —                            |
+| parse XML      | profile (677 KiB)       | **0.91 ms**            | 1.68 ms (1.8×)  | 1.48 ms (1.6×) | —                            |
+| build XML      | auth response           | **1.2 µs**             | 12.2 µs (10.4×) | 9.1 µs (7.8×)  | —                            |
+| build XML      | device list             | **0.38 ms**            | 2.81 ms (7.3×)  | 2.83 ms (7.4×) | —                            |
+| build XML      | profile                 | **88 µs**              | 2.22 ms (25.3×) | 164 µs (1.9×)  | —                            |
+| parse OpenStep | auth response           | **4.4 µs**             | 24.1 µs (5.4×)  | —              | —                            |
+| parse OpenStep | device list             | **0.26 ms**            | 0.66 ms (2.5×)  | —              | —                            |
+| parse OpenStep | profile                 | **3.09 ms**            | 18.5 ms (6.0×)  | —              | —                            |
+| parse binary   | auth response (0.9 KiB) | **0.79 µs** (1.0 µs †) | 0.84 µs (1.1×)  | —              | 2.5 µs (3.2×)                |
+| parse binary   | device list (57 KiB)    | **0.20 ms**            | 0.34 ms (1.7×)  | —              | 0.88 ms (4.3×)               |
+| parse binary   | profile (493 KiB)       | **1.0 µs** (20.5 µs †) | 1.2 µs (1.2×)   | —              | 2.6 µs (2.5×)                |
+| build binary   | auth response           | **2.1 µs**             | 2.9 µs (1.4×)   | —              | 10.1 µs (4.8×)               |
+| build binary   | device list             | **0.49 ms**            | 0.69 ms (1.4×)  | —              | 2.62 ms (5.3×)               |
+| build binary   | profile                 | **25 µs**              | 47.8 µs (2.0×)  | —              | 53.4 µs (2.2×)               |
 
 Measured on an Apple M5 Max, Node.js 24, single thread, with `plist` 5.0.0, `@expo/plist` 0.8.0, `bplist-parser` 0.3.2, and `bplist-creator` 0.1.1. Multipliers are relative to `rork-plist` on the same row. Reproduce with `pnpm bench:compare`; `pnpm bench` runs the library's own suite.
 

@@ -75,7 +75,8 @@ async function collectPlists(root: string, paths: string[], limit: number): Prom
     const path = join(root, entry.name);
     if (entry.isDirectory()) {
       await collectPlists(path, paths, limit);
-    } else if (entry.isFile() && entry.name.endsWith(".plist")) {
+    } else if (entry.isFile() && (entry.name.endsWith(".plist") || entry.name === "project.pbxproj")) {
+      // Xcode project files are OpenStep property lists under another name.
       paths.push(path);
     }
   }
@@ -92,7 +93,7 @@ function bucketOf(byteLength: number): number {
   return BUCKETS.findIndex((bucket) => byteLength < bucket.max);
 }
 
-/** Where a swept file landed — parsed, out of the format's scope, or corrupt. */
+/** Where a swept file landed — parsed (by format), out of scope, or corrupt. */
 type Outcome =
   | "binary"
   | "invalid-per-plutil"
@@ -101,6 +102,28 @@ type Outcome =
   | "openstep"
   | "unsupported-binary-version"
   | "xml";
+
+/**
+ * Labels a successfully parsed file by the format it took. The text formats
+ * are told apart by the first significant character, the same signal the
+ * parser's own dispatch uses (an OpenStep document rooted in a data literal
+ * would label as XML here, but on-disk documents are dictionaries).
+ */
+function classifySuccess(bytes: Uint8Array, isBinary: boolean): Outcome {
+  if (isBinary) {
+    return "binary";
+  }
+  const prefix =
+    new TextDecoder("utf-16le").decode(bytes.subarray(0, 2)) === "\ufeff"
+      ? new TextDecoder("utf-16le").decode(bytes.subarray(0, 256))
+      : new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 256));
+  return prefix
+    .replace(/^\ufeff/u, "")
+    .trimStart()
+    .startsWith("<")
+    ? "xml"
+    : "openstep";
+}
 
 interface ParsedFile {
   bucket: number;
@@ -186,7 +209,9 @@ function bytesContain(bytes: Uint8Array, marker: string): boolean {
  * Classifies a file this library failed to parse, deciding by the format
  * first and consulting plutil only where its verdict changes the outcome.
  * Only the `mismatch` outcome is a finding; everything else is input outside
- * the format's scope or corrupt by plutil's own account.
+ * the format's scope or corrupt by plutil's own account. Text failures have
+ * no scope carve-out anymore — every text plist plutil reads, whichever
+ * grammar it uses, is one this library must read too.
  */
 async function classifyFailure(path: string, bytes: Uint8Array, isBinary: boolean): Promise<Outcome> {
   if (isBinary) {
@@ -196,15 +221,8 @@ async function classifyFailure(path: string, bytes: Uint8Array, isBinary: boolea
     if (bytesContain(bytes, "$archiver")) {
       return "keyed-archive";
     }
-    return (await plutilAccepts(path)) ? "mismatch" : "invalid-per-plutil";
   }
-  if (!(await plutilAccepts(path))) {
-    return "invalid-per-plutil";
-  }
-  // plutil accepts it and it is not XML we could read; OpenStep text plists
-  // have no leading '<' once whitespace is skipped.
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  return text.trimStart().startsWith("<") ? "mismatch" : "openstep";
+  return (await plutilAccepts(path)) ? "mismatch" : "invalid-per-plutil";
 }
 
 const options = parseArgs(process.argv.slice(2));
@@ -236,7 +254,7 @@ for (const path of paths) {
   try {
     const value = parsePlist(bytes);
     const ms = performance.now() - start;
-    const outcome: Outcome = isBinary ? "binary" : "xml";
+    const outcome = classifySuccess(bytes, isBinary);
     counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
     parsed.push({ bucket: bucketOf(bytes.length), bytes: bytes.length, ms, path, value });
   } catch (error) {

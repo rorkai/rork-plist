@@ -1,17 +1,18 @@
 /**
  * Property list parsing entry point and the XML parser.
  *
- * {@link parsePlist} is the public entry. It takes an XML string, or a buffer
- * that it routes to the binary parser (see {@link "./parse-binary"}) or
- * decodes as XML text — UTF-8, or UTF-16 when a byte order mark says so, the
- * same encoding selection the reference parser applies. The XML parser
- * itself is a hand-written
- * recursive-descent scanner over the property list grammar rather than a
- * general XML parser. The plist DTD is a closed vocabulary of ten elements
- * with no meaningful attributes, so a dedicated scanner is both faster and
- * safer — DOCTYPE internal subsets are skipped without processing, and
- * external entities simply do not exist here, which rules out
- * entity-expansion and external-entity attacks by construction.
+ * {@link parsePlist} is the public entry. It routes a buffer to the binary
+ * parser (see {@link "./parse-binary"}) or decodes it as text — UTF-8, or
+ * UTF-16 when a byte order mark says so, the same encoding selection the
+ * reference parser applies — and text dispatches between this module's XML
+ * grammar and the OpenStep grammar (see {@link "./parse-openstep"}). The XML
+ * parser itself is a hand-written recursive-descent scanner over the
+ * property list grammar rather than a general XML parser. The plist DTD is a
+ * closed vocabulary of ten elements with no meaningful attributes, so a
+ * dedicated scanner is both faster and safer — DOCTYPE internal subsets are
+ * skipped without processing, and external entities simply do not exist
+ * here, which rules out entity-expansion and external-entity attacks by
+ * construction.
  *
  * Grammar decisions mirror the reference implementation's observed behavior,
  * verified against the platform plist tooling in the test suite. That covers
@@ -60,13 +61,14 @@ import {
   PLIST_INTEGER_MIN,
 } from "./internal/integer-range";
 import { hasBinaryPlistMagic, parseBinaryPlist } from "./parse-binary";
+import { parseOpenStepPlist } from "./parse-openstep";
 import { DEFAULT_MAX_DEPTH, type ParsePlistOptions } from "./parse-options";
 import type { PlistArray, PlistDictionary, PlistValue } from "./types";
 
 export type { ParsePlistOptions } from "./parse-options";
 
 /**
- * Decodes UTF-8 bytes to a string for the XML path of {@link parsePlist}.
+ * Decodes UTF-8 bytes to a string for the text path of {@link parsePlist}.
  * `fatal` makes malformed byte sequences throw instead of decoding to the
  * replacement character, so a corrupt buffer fails loudly rather than parsing
  * into silently mangled string values.
@@ -81,7 +83,7 @@ const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
  * and BOM-less UTF-16 is rejected, both verified against the platform
  * tooling, which behaves the same way.
  */
-function decodeXmlBytes(input: Uint8Array): string {
+function decodeTextBytes(input: Uint8Array): string {
   if (input.length >= 2) {
     if (input[0] === 0xff && input[1] === 0xfe) {
       return decodeUtf16(input, true);
@@ -257,11 +259,14 @@ interface OpenTag {
 /**
  * Parses a property list into JavaScript values.
  *
- * Accepts both formats. A `string` is always parsed as XML. A `Uint8Array` is
- * parsed as binary (`bplist00`) when it carries the binary magic, and
- * otherwise decoded as XML text — UTF-8, or UTF-16 when a byte order mark
- * announces it — so a caller holding raw bytes (a file read, an HTTP body)
- * can pass them through without sniffing the format or encoding first.
+ * Accepts every format the platform reads. A `Uint8Array` is parsed as
+ * binary (`bplist00`) when it carries the binary magic, and otherwise
+ * decoded as text — UTF-8, or UTF-16 when a byte order mark announces it. A
+ * `string`, or decoded text, parses as XML when its first significant
+ * character is `<` and as OpenStep otherwise (see
+ * {@link parseOpenStepPlist}), so a caller holding raw bytes (a file read,
+ * an HTTP body) can pass them through without sniffing the format or
+ * encoding first.
  *
  * XML parsing accepts complete documents — XML declaration, DOCTYPE, comments,
  * a `<plist>` wrapper — as well as bare root elements, mirroring the reference
@@ -289,12 +294,53 @@ export function parsePlist(input: string | Uint8Array, options: ParsePlistOption
     if (hasBinaryPlistMagic(input)) {
       return parseBinaryPlist(input, options);
     }
-    return parseXml(decodeXmlBytes(input), options);
+    return parseText(decodeTextBytes(input), options);
   }
-  return parseXml(input, options);
+  return parseText(input, options);
 }
 
-/** Parses an XML property list string; the string path of {@link parsePlist}. */
+/**
+ * Dispatches decoded text between the XML and OpenStep grammars.
+ *
+ * XML markup must begin with `<`, so text whose first significant character
+ * is anything else is OpenStep. Text that does begin with `<` parses as XML,
+ * with one verified exception mirroring the reference parser: when XML
+ * parsing fails and the character after `<` could open a root-level OpenStep
+ * data literal (a hex digit, whitespace, or `>`), the OpenStep reading is
+ * tried before the XML error surfaces — `<dada>` is four data bytes to the
+ * platform tooling, not markup. When both grammars reject such input, the
+ * XML error is the one reported, since markup-shaped input almost always
+ * means XML was intended.
+ */
+function parseText(text: string, options: ParsePlistOptions): PlistValue {
+  let sniff = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  while (sniff < text.length && isWhitespaceCode(text.charCodeAt(sniff))) {
+    sniff++;
+  }
+  if (text.charCodeAt(sniff) !== LESS_THAN) {
+    return parseOpenStepPlist(text, options);
+  }
+
+  try {
+    return parseXml(text, options);
+  } catch (xmlError) {
+    const next = text.charCodeAt(sniff + 1);
+    const isHexDigit =
+      (next >= DIGIT_ZERO && next <= DIGIT_NINE) ||
+      (next >= 0x61 && next <= 0x66) || // a-f
+      (next >= 0x41 && next <= 0x46); // A-F
+    if (isHexDigit || isWhitespaceCode(next) || next === GREATER_THAN) {
+      try {
+        return parseOpenStepPlist(text, options);
+      } catch {
+        throw xmlError;
+      }
+    }
+    throw xmlError;
+  }
+}
+
+/** Parses an XML property list string; the XML path of {@link parseText}. */
 function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
   return new Parser(xml, options.maxDepth ?? DEFAULT_MAX_DEPTH).parseDocument();
 }

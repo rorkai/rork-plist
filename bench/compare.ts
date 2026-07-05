@@ -31,10 +31,18 @@ import {
   buildBinary as plistBuildBinary,
   parse as plistParse,
   parseBinary as plistParseBinary,
+  parseOpenStep as plistParseOpenStep,
   type PlistValue as PlistPackageValue,
 } from "plist";
 
-import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index.js";
+import {
+  buildBinaryPlist,
+  buildPlist,
+  parseBinaryPlist,
+  parseOpenStepPlist,
+  parsePlist,
+  type PlistValue,
+} from "../dist/index.js";
 
 // The remaining three libraries are CommonJS without usable ESM-facing types
 // (@expo/plist ships declarations that miss its double-wrapped default
@@ -93,11 +101,36 @@ const shapes: Record<string, PlistValue> = {
   },
 };
 
-/** One document shape with its canonical XML and binary encodings. */
+/** One document shape with its canonical XML, binary, and OpenStep encodings. */
 interface Fixture {
   binary: Uint8Array;
+  openStep: string;
   value: PlistValue;
   xml: string;
+}
+
+/**
+ * Serializes a fixture value as OpenStep text. The format is untyped, so
+ * scalars become quoted strings and binary payloads become hex data; JSON
+ * string quoting is escape-compatible for the printable-ASCII content the
+ * fixtures use. plutil cannot write OpenStep, so the fixture is produced
+ * here and, on macOS, validated through `plutil -lint` before timing.
+ */
+function toOpenStep(value: PlistValue): string {
+  if (value instanceof Uint8Array) {
+    return `<${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}>`;
+  }
+  if (Array.isArray(value)) {
+    return `(${value.map(toOpenStep).join(", ")})`;
+  }
+  if (value instanceof Date) {
+    return JSON.stringify(value.toISOString());
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value).map(([key, entry]) => `${JSON.stringify(key)} = ${toOpenStep(entry!)};`);
+    return `{ ${entries.join(" ")} }`;
+  }
+  return JSON.stringify(String(value));
 }
 
 /** Produces plutil-canonical fixture bytes on darwin, our own output elsewhere. */
@@ -108,12 +141,15 @@ function makeFixtures(): Record<string, Fixture> {
     try {
       for (const [name, value] of Object.entries(shapes)) {
         const path = join(dir, "doc.plist");
+        const openStep = toOpenStep(value);
+        writeFileSync(path, openStep);
+        execFileSync("plutil", ["-lint", path]);
         writeFileSync(path, buildPlist(value));
         execFileSync("plutil", ["-convert", "binary1", path]);
         const binary = new Uint8Array(readFileSync(path));
         execFileSync("plutil", ["-convert", "xml1", path]);
         const xml = readFileSync(path, "utf8");
-        fixtures[name] = { binary, value, xml };
+        fixtures[name] = { binary, openStep, value, xml };
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -121,7 +157,7 @@ function makeFixtures(): Record<string, Fixture> {
   } else {
     console.log("plutil is unavailable off macOS; fixtures use this library's writers\n");
     for (const [name, value] of Object.entries(shapes)) {
-      fixtures[name] = { binary: buildBinaryPlist(value), value, xml: buildPlist(value) };
+      fixtures[name] = { binary: buildBinaryPlist(value), openStep: toOpenStep(value), value, xml: buildPlist(value) };
     }
   }
   return fixtures;
@@ -178,7 +214,7 @@ const fixtures = makeFixtures();
 /** Geometric-mean multiplier vs rork-plist per operation, printed at the end. */
 const summary = new Map<string, number[]>();
 
-for (const [name, { binary, value, xml }] of Object.entries(fixtures)) {
+for (const [name, { binary, openStep, value, xml }] of Object.entries(fixtures)) {
   const buf = Buffer.from(binary.buffer, binary.byteOffset, binary.byteLength);
   // The fixtures avoid the corners where the value models differ (no bigint,
   // and data payloads are Buffers), so one runtime value serves every library.
@@ -199,6 +235,13 @@ for (const [name, { binary, value, xml }] of Object.entries(fixtures)) {
         ["rork-plist", () => buildPlist(value)],
         ["plist", () => plistBuild(foreignValue)],
         ["@expo/plist", () => expoPlist.build(value)],
+      ],
+    ],
+    [
+      "parse OpenStep",
+      [
+        ["rork-plist", () => parseOpenStepPlist(openStep)],
+        ["plist", () => plistParseOpenStep(openStep)],
       ],
     ],
     [
