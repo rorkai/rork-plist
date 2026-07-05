@@ -162,6 +162,26 @@ async function plutilAccepts(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Reports whether the buffer contains an ASCII marker. Keyed archives are
+ * recognized by the `$archiver` key the archive format itself writes, which
+ * keeps the classification independent of this library's error wording.
+ * Runs only on parse failures, so the simple scan costs nothing overall.
+ */
+function bytesContain(bytes: Uint8Array, marker: string): boolean {
+  const limit = bytes.length - marker.length;
+  for (let i = 0; i <= limit; i++) {
+    let matched = 0;
+    while (matched < marker.length && bytes[i + matched] === marker.charCodeAt(matched)) {
+      matched++;
+    }
+    if (matched === marker.length) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const options = parseArgs(process.argv.slice(2));
 
 console.log(`collecting .plist files under ${options.roots.join(", ")} (max ${options.maxFiles})`);
@@ -197,19 +217,25 @@ for (const path of paths) {
   } catch (error) {
     const message = error instanceof PlistParseError ? error.message : String(error);
     let outcome: Outcome;
-    if (message.includes("UID objects")) {
-      outcome = "keyed-archive";
-    } else if (isBinary && !(bytes[6] === 0x30 && bytes[7] === 0x30)) {
-      outcome = "unsupported-binary-version";
-    } else if (!(await plutilAccepts(path))) {
-      outcome = "invalid-per-plutil";
-    } else if (!isBinary) {
+    if (isBinary) {
+      if (bytes[6] === 0x30 && bytes[7] === 0x30) {
+        if (bytesContain(bytes, "$archiver")) {
+          outcome = "keyed-archive";
+        } else if (await plutilAccepts(path)) {
+          outcome = "mismatch";
+        } else {
+          outcome = "invalid-per-plutil";
+        }
+      } else {
+        outcome = "unsupported-binary-version";
+      }
+    } else if (await plutilAccepts(path)) {
       // plutil accepts it and it is not XML we could read; OpenStep text
       // plists have no leading '<' once whitespace is skipped.
       const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
       outcome = text.trimStart().startsWith("<") ? "mismatch" : "openstep";
     } else {
-      outcome = "mismatch";
+      outcome = "invalid-per-plutil";
     }
     counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
     if (outcome === "mismatch") {
