@@ -37,6 +37,7 @@ import {
 
 import {
   buildBinaryPlist,
+  buildOpenStepPlist,
   buildPlist,
   parseBinaryPlist,
   parseOpenStepPlist,
@@ -110,31 +111,25 @@ interface Fixture {
 }
 
 /**
- * Serializes a fixture value as OpenStep text, purely for this benchmark —
- * the library ships no OpenStep writer because the platform tooling has
- * none either, so the fixture is produced here and, on macOS, validated
- * through `plutil -lint` before timing. The format is untyped, so scalars
- * become quoted strings and binary payloads become hex data; JSON string
- * quoting is escape-compatible for the printable-ASCII content the fixtures
- * use.
+ * Rewrites a fixture value into the OpenStep value model, which is untyped —
+ * numbers, booleans, and dates become strings — so the library's own
+ * OpenStep writer can serialize it. On macOS the produced fixture is
+ * additionally validated through `plutil -lint` before timing.
  */
-function buildOpenStepPlist(value: PlistValue): string {
+function stringifyLeaves(value: PlistValue): PlistValue {
   if (value instanceof Uint8Array) {
-    return `<${[...value].map((byte) => byte.toString(16).padStart(2, "0")).join("")}>`;
+    return value;
   }
   if (Array.isArray(value)) {
-    return `(${value.map(buildOpenStepPlist).join(", ")})`;
+    return value.map(stringifyLeaves);
   }
   if (value instanceof Date) {
-    return JSON.stringify(value.toISOString());
+    return value.toISOString();
   }
   if (typeof value === "object" && value !== null) {
-    const entries = Object.entries(value).map(
-      ([key, entry]) => `${JSON.stringify(key)} = ${buildOpenStepPlist(entry!)};`,
-    );
-    return `{ ${entries.join(" ")} }`;
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, stringifyLeaves(entry!)]));
   }
-  return JSON.stringify(String(value));
+  return String(value);
 }
 
 /** Produces plutil-canonical fixture bytes on darwin, our own output elsewhere. */
@@ -145,7 +140,7 @@ function makeFixtures(): Record<string, Fixture> {
     try {
       for (const [name, value] of Object.entries(shapes)) {
         const path = join(dir, "doc.plist");
-        const openStep = buildOpenStepPlist(value);
+        const openStep = buildOpenStepPlist(stringifyLeaves(value));
         writeFileSync(path, openStep);
         execFileSync("plutil", ["-lint", path]);
         writeFileSync(path, buildPlist(value));
@@ -163,7 +158,7 @@ function makeFixtures(): Record<string, Fixture> {
     for (const [name, value] of Object.entries(shapes)) {
       fixtures[name] = {
         binary: buildBinaryPlist(value),
-        openStep: buildOpenStepPlist(value),
+        openStep: buildOpenStepPlist(stringifyLeaves(value)),
         value,
         xml: buildPlist(value),
       };

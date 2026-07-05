@@ -73,7 +73,7 @@ Parses a binary (`bplist00`) property list explicitly, skipping the format sniff
 
 ### `parseOpenStepPlist(text, options?)`
 
-Parses an OpenStep (NeXTSTEP) text property list explicitly — the legacy format of Xcode's `project.pbxproj` and `.strings` localization files. The format is untyped, so leaves parse as strings (quoted or bare) or `Uint8Array` (`<hex>` data); strings-file documents, including the bare `"key";` shorthand, parse as dictionaries. The reference implementation reads OpenStep but cannot write it, and this library mirrors that.
+Parses an OpenStep (NeXTSTEP) text property list explicitly — the legacy format of Xcode's `project.pbxproj` and `.strings` localization files. The format is untyped, so leaves parse as strings (quoted or bare) or `Uint8Array` (`<hex>` data); strings-file documents, including the bare `"key";` shorthand, parse as dictionaries.
 
 All parsers accept the same options:
 
@@ -113,6 +113,20 @@ import { buildBinaryPlist } from "rork-plist";
 const bytes = buildBinaryPlist({ device: "iPhone17,1", enabled: true });
 ```
 
+### `buildOpenStepPlist(value, options?)`
+
+Serializes a value as an OpenStep text property list — something the platform tooling itself cannot do (`plutil -convert` has no OpenStep target), which makes programmatic `project.pbxproj` and `.strings` editing a parse–modify–build loop within one library. Since output cannot be diffed against a reference writer, correctness is defined by acceptance: every emitted document is verified to parse identically through this library and the platform parser.
+
+The format is untyped, so only its value model is accepted — strings, `Uint8Array` data, arrays, and dictionaries. Numbers, bigints, booleans, and dates are rejected with the offending value's path rather than silently stringified; convert them deliberately first. Strings are written bare when the grammar reads them back verbatim and double-quoted with escapes otherwise. The `indent` option matches `buildPlist` (tab default, `false` for a single-line body), and a dictionary key whose value is `undefined` is omitted.
+
+```ts
+import { buildOpenStepPlist, parseOpenStepPlist } from "rork-plist";
+
+const project = parseOpenStepPlist(await readFile("project.pbxproj", "utf8")) as Record<string, unknown>;
+project["archiveVersion"] = "2";
+await writeFile("project.pbxproj", buildOpenStepPlist(project));
+```
+
 ### `encodeBase64(bytes)` / `decodeBase64(text)`
 
 The strict RFC 4648 codec used for `<data>` elements, exported because protocol code usually needs one. `decodeBase64` tolerates whitespace and omitted padding but rejects everything else.
@@ -138,7 +152,7 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 
 - **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
-- **OpenStep plists** — the format of Xcode's `project.pbxproj` and of `.strings` localization files — parse via `parsePlist` or `parseOpenStepPlist`. The grammar follows the reference parser, probed case by case: single- and double-quoted strings, the C escape set, octal escapes mapped through the NeXTSTEP encoding, raw `\U` code units, non-nesting comments, whitespace-separated hex data groups, the bare-key `"key";` shorthand, and brace-less strings-file documents. The format is untyped, so leaves parse as strings or data. Writing OpenStep is unsupported in the platform tooling and unsupported here.
+- **OpenStep plists** — the format of Xcode's `project.pbxproj` and of `.strings` localization files — parse via `parsePlist` or `parseOpenStepPlist` and build via `buildOpenStepPlist`. The parsing grammar follows the reference parser, probed case by case: single- and double-quoted strings, the C escape set, octal escapes mapped through the NeXTSTEP encoding, raw `\U` code units, non-nesting comments, whitespace-separated hex data groups, the bare-key `"key";` shorthand, and brace-less strings-file documents. The format is untyped, so leaves parse as strings or data, and the writer accepts exactly that value model — typed values are rejected rather than silently stringified. The platform tooling cannot write OpenStep at all, so written output is verified by acceptance: it parses identically through this library and the platform parser.
 
 - **64-bit integers.** `<integer>` covers the full signed/unsigned 64-bit window `[-(2^63), 2^64 - 1]`; values beyond that fail to parse and to build. Values that exceed `Number.MAX_SAFE_INTEGER` parse as `bigint`, so identifiers and tokens never lose precision silently. Hexadecimal spellings (`0x1F`, `-0x10`) parse like the reference implementation.
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.

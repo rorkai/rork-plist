@@ -7,8 +7,8 @@
  * value; }` dictionaries, `( a, b )` arrays, `<0fbd77>` hex data, and quoted
  * or bare strings — the format is untyped, so every leaf other than data is
  * a string. The reference implementation reads OpenStep but cannot write it
- * (`plutil -convert` offers no OpenStep target), and this library mirrors
- * that: parsing only.
+ * (`plutil -convert` offers no OpenStep target); this library also writes it
+ * through {@link "./build-openstep"}, verified against the reference parser.
  *
  * Every grammar decision here is pinned empirically against the platform
  * parser, probed case by case through plutil: the bare-key `"key";`
@@ -90,9 +90,10 @@ function isOpenStepWhitespace(code: number): boolean {
  * Reports whether a code unit may appear in a bare (unquoted) string. The
  * alphabet is exactly the reference parser's: ASCII letters and digits plus
  * `_`, `$`, `/`, `:`, `.`, and `-`. Everything else — including non-ASCII —
- * requires quoting.
+ * requires quoting. Shared with {@link "./build-openstep"}, which quotes any
+ * string this alphabet cannot carry.
  */
-function isBareStringCode(code: number): boolean {
+export function isOpenStepBareCode(code: number): boolean {
   return (
     (code >= 0x61 && code <= 0x7a) || // a-z
     (code >= 0x41 && code <= 0x5a) || // A-Z
@@ -342,7 +343,7 @@ class OpenStepParser {
     if (code === 0x22 || code === 0x27) {
       return this.parseQuotedString(code);
     }
-    if (isBareStringCode(code)) {
+    if (isOpenStepBareCode(code)) {
       return this.parseBareString();
     }
     this.fail(`expected ${role}`);
@@ -352,7 +353,7 @@ class OpenStepParser {
   private parseBareString(): string {
     const src = this.src;
     const start = this.pos;
-    while (this.pos < src.length && isBareStringCode(src.charCodeAt(this.pos))) {
+    while (this.pos < src.length && isOpenStepBareCode(src.charCodeAt(this.pos))) {
       this.pos++;
     }
     if (this.pos === start) {
