@@ -24,8 +24,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The build toolchain needs Node 22+; the published artifact's
-        # runtime floor (Node 20) is verified by the runtime-floor job.
+        # The contributor toolchain needs Node 22.18+ (declared in
+        # devEngines); the published artifact's runtime floor (Node 20) is
+        # verified by the runtime-floor job. setup-node resolves each major
+        # to its latest release, which satisfies the 22.18 floor.
         os: [ubuntu-latest, macos-latest]
         node: [22, 24]
     steps:
