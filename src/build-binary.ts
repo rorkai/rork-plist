@@ -508,17 +508,18 @@ class BinaryBuilder {
 
   /** Encodes a resolved node; containers now know the reference width. */
   private encodeNode(node: ObjectNode, refSize: number): Uint8Array[] {
-    if (node.kind === "scalar") {
-      return node.pieces;
+    switch (node.kind) {
+      case "scalar":
+        return node.pieces;
+      case "array":
+        return [this.sizeHeader(0xa0, node.items.length), this.encodeRefs(node.items, refSize)];
+      case "dict":
+        return [
+          this.sizeHeader(0xd0, node.keys.length),
+          this.encodeRefs(node.keys, refSize),
+          this.encodeRefs(node.values, refSize),
+        ];
     }
-    if (node.kind === "array") {
-      return [this.sizeHeader(0xa0, node.items.length), this.encodeRefs(node.items, refSize)];
-    }
-    return [
-      this.sizeHeader(0xd0, node.keys.length),
-      this.encodeRefs(node.keys, refSize),
-      this.encodeRefs(node.values, refSize),
-    ];
   }
 
   /** Encodes a list of object references, each `refSize` big-endian bytes. */

@@ -301,28 +301,32 @@ class BinaryParser {
    * enforcing the same 64-bit window as the XML parser.
    */
   private parseInteger(offset: number, byteCount: number): number | bigint {
-    if (byteCount <= 4) {
-      return this.readBigEndianUint(offset + 1, byteCount);
-    }
-    if (byteCount !== 8 && byteCount !== 16) {
-      this.fail(`unsupported <integer> width of ${byteCount} bytes`, offset);
-    }
+    switch (byteCount) {
+      case 1:
+      case 2:
+      case 4:
+        return this.readBigEndianUint(offset + 1, byteCount);
+      case 8:
+      case 16: {
+        let magnitude = 0n;
+        for (let i = 0; i < byteCount; i++) {
+          magnitude = (magnitude << 8n) | BigInt(this.u8(offset + 1 + i));
+        }
+        const bits = BigInt(byteCount * 8);
+        const signBit = 1n << (bits - 1n);
+        const value = magnitude >= signBit ? magnitude - (1n << bits) : magnitude;
 
-    let magnitude = 0n;
-    for (let i = 0; i < byteCount; i++) {
-      magnitude = (magnitude << 8n) | BigInt(this.u8(offset + 1 + i));
+        if (value < PLIST_INTEGER_MIN || value > PLIST_INTEGER_MAX) {
+          this.fail("<integer> overflows the 64-bit property list range", offset);
+        }
+        if (value >= MIN_SAFE_INTEGER_BIGINT && value <= MAX_SAFE_INTEGER_BIGINT) {
+          return Number(value);
+        }
+        return value;
+      }
+      default:
+        this.fail(`unsupported <integer> width of ${byteCount} bytes`, offset);
     }
-    const bits = BigInt(byteCount * 8);
-    const signBit = 1n << (bits - 1n);
-    const value = magnitude >= signBit ? magnitude - (1n << bits) : magnitude;
-
-    if (value < PLIST_INTEGER_MIN || value > PLIST_INTEGER_MAX) {
-      this.fail("<integer> overflows the 64-bit property list range", offset);
-    }
-    if (value >= MIN_SAFE_INTEGER_BIGINT && value <= MAX_SAFE_INTEGER_BIGINT) {
-      return Number(value);
-    }
-    return value;
   }
 
   /**
@@ -331,13 +335,14 @@ class BinaryParser {
    */
   private parseReal(offset: number, byteCount: number): number {
     this.requireBytes(offset + 1, byteCount);
-    if (byteCount === 4) {
-      return this.view.getFloat32(offset + 1);
+    switch (byteCount) {
+      case 4:
+        return this.view.getFloat32(offset + 1);
+      case 8:
+        return this.view.getFloat64(offset + 1);
+      default:
+        this.fail(`unsupported <real> width of ${byteCount} bytes`, offset);
     }
-    if (byteCount === 8) {
-      return this.view.getFloat64(offset + 1);
-    }
-    this.fail(`unsupported <real> width of ${byteCount} bytes`, offset);
   }
 
   /**
@@ -514,7 +519,7 @@ class BinaryParser {
    * @returns The referenced object's index into the offset table.
    */
   private readRef(offset: number): number {
-    const index = this.readTableEntry(offset, this.objectRefSize);
+    const index = this.readUintSized(offset, this.objectRefSize);
     if (index >= this.objectCount) {
       this.fail("binary object reference is out of range", offset);
     }
@@ -530,7 +535,7 @@ class BinaryParser {
    */
   private objectOffset(index: number): number {
     const entry = this.offsetTableOffset + index * this.offsetIntSize;
-    const offset = this.readTableEntry(entry, this.offsetIntSize);
+    const offset = this.readUintSized(entry, this.offsetIntSize);
     if (offset < MAGIC.length || offset >= this.offsetTableOffset) {
       this.fail("binary object offset is out of bounds", entry);
     }
@@ -538,18 +543,18 @@ class BinaryParser {
   }
 
   /**
-   * Reads one offset-table entry or object reference whose span was already
-   * validated. One- and two-byte widths cover practically every document, so
-   * they read directly before falling back to the general width switch.
+   * Reads an offset-table entry or object reference whose span was already
+   * validated. One- and two-byte widths cover practically every document.
    */
-  private readTableEntry(offset: number, size: number): number {
-    if (size === 1) {
-      return this.bytes[offset]!;
+  private readUintSized(offset: number, size: number): number {
+    switch (size) {
+      case 1:
+        return this.bytes[offset]!;
+      case 2:
+        return this.view.getUint16(offset);
+      default:
+        return this.readUintUnchecked(offset, size);
     }
-    if (size === 2) {
-      return this.view.getUint16(offset);
-    }
-    return this.readUintUnchecked(offset, size);
   }
 
   /**

@@ -91,6 +91,23 @@ function describeInvalidBase64(stripped: string): RangeError {
 }
 
 /**
+ * Returns how many bytes a trailing partial group of base64 symbols carries.
+ * Two symbols hold one byte and three hold two; a remainder of zero means the
+ * input divided into full groups. A remainder of one was already rejected as
+ * truncated input before this runs.
+ */
+function trailingByteCount(remainder: number): number {
+  switch (remainder) {
+    case 2:
+      return 1;
+    case 3:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Returns the six-bit value of one validated alphabet symbol.
  *
  * Input reaching this function has already passed the shape check, so a
@@ -141,7 +158,7 @@ export function decodeBase64(text: string): Uint8Array {
     throw new RangeError("base64 input is truncated");
   }
 
-  const byteLength = Math.floor(symbolCount / 4) * 3 + (remainder === 2 ? 1 : remainder === 3 ? 2 : 0);
+  const byteLength = Math.floor(symbolCount / 4) * 3 + trailingByteCount(remainder);
 
   const buffer = nativeBuffer();
   if (buffer) {
@@ -208,14 +225,19 @@ export function encodeBase64(bytes: Uint8Array): string {
     }
   }
 
-  if (bitsCollected === 8) {
-    out += ALPHABET.charAt((accumulator >>> 2) & 63) + ALPHABET.charAt((accumulator << 4) & 63) + "==";
-  } else if (bitsCollected === 16) {
-    out +=
-      ALPHABET.charAt((accumulator >>> 10) & 63) +
-      ALPHABET.charAt((accumulator >>> 4) & 63) +
-      ALPHABET.charAt((accumulator << 2) & 63) +
-      "=";
+  // One leftover byte flushes as two symbols, two bytes as three; zero
+  // leftover bits mean the input divided into full three-byte groups.
+  switch (bitsCollected) {
+    case 8:
+      out += ALPHABET.charAt((accumulator >>> 2) & 63) + ALPHABET.charAt((accumulator << 4) & 63) + "==";
+      break;
+    case 16:
+      out +=
+        ALPHABET.charAt((accumulator >>> 10) & 63) +
+        ALPHABET.charAt((accumulator >>> 4) & 63) +
+        ALPHABET.charAt((accumulator << 2) & 63) +
+        "=";
+      break;
   }
 
   return out;
