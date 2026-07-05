@@ -6,6 +6,7 @@
 Zero-dependency Apple plist parser and builder for any JavaScript runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
 
 ```ts
+import { readFile } from "node:fs/promises";
 import { parsePlist, buildPlist } from "rork-plist";
 
 const value = parsePlist(`<?xml version="1.0" encoding="UTF-8"?>
@@ -24,6 +25,8 @@ const xml = buildPlist({ device: "iPhone17,1", enabled: true });
 // A buffer is auto-detected: binary bplist00, otherwise UTF-8 XML.
 const fromBundle = parsePlist(await readFile("Info.plist")); // Uint8Array in, value out
 ```
+
+> The `await` above runs at the top level of an ESM module; inside CommonJS or a function, wrap it in an `async` function.
 
 ## Why
 
@@ -128,7 +131,7 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 
 Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS.
 
-- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects binary vs. XML from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
+- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects binary vs. XML from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
 - **64-bit integers.** `<integer>` covers the full signed/unsigned 64-bit window `[-(2^63), 2^64 - 1]`; values beyond that fail to parse and to build. Values that exceed `Number.MAX_SAFE_INTEGER` parse as `bigint`, so identifiers and tokens never lose precision silently. Hexadecimal spellings (`0x1F`, `-0x10`) parse like the reference implementation.
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.
@@ -143,17 +146,17 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 Run benchmarks with `pnpm bench`; it builds first and measures the published artifact.
 
 <p align="center">
-  <img src="assets/performance.svg" alt="Benchmark table: in XML form, an auth response parses in 3.4 microseconds and builds in 1.1 microseconds, a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds, and a data-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds; in binary form, the auth response parses in 1.0 microsecond and builds in 3.8 microseconds, the device list parses in 0.36 milliseconds and builds in 0.83 milliseconds, and the profile parses in 19 microseconds and builds in 0.13 milliseconds" width="880" />
+  <img src="assets/performance.svg" alt="Benchmark table: in XML form, an auth response parses in 3.4 microseconds and builds in 1.1 microseconds, a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds, and a data-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds; in binary form, the auth response parses in 1.3 microseconds and builds in 3.8 microseconds, the device list parses in 0.29 milliseconds and builds in 0.83 milliseconds, and the profile parses in 19 microseconds and builds in 0.13 milliseconds" width="880" />
 </p>
 
 | Document                        | Format | Size    | Parse   | Build   | Parse speed | Build speed |
 | ------------------------------- | ------ | ------- | ------- | ------- | ----------- | ----------- |
 | auth response                   | XML    | 1.5 KiB | 3.4 µs  | 1.1 µs  | ~430 MiB/s  | ~1.2 GiB/s  |
-| auth response                   | binary | 0.9 KiB | 1.0 µs  | 3.8 µs  | ~880 MiB/s  | ~230 MiB/s  |
+| auth response                   | binary | 0.9 KiB | 1.3 µs  | 3.8 µs  | ~700 MiB/s  | ~230 MiB/s  |
 | device list (500 dated entries) | XML    | 179 KiB | 0.72 ms | 0.42 ms | ~240 MiB/s  | ~420 MiB/s  |
-| device list (500 dated entries) | binary | 55 KiB  | 0.36 ms | 0.83 ms | ~150 MiB/s  | ~65 MiB/s   |
+| device list (500 dated entries) | binary | 55 KiB  | 0.29 ms | 0.83 ms | ~190 MiB/s  | ~65 MiB/s   |
 | profile (data-heavy)            | XML    | 658 KiB | 0.71 ms | 79 µs   | ~900 MiB/s  | ~7.9 GiB/s  |
-| profile (data-heavy)            | binary | 493 KiB | 19 µs   | 0.13 ms | ~25 GiB/s   | ~3.6 GiB/s  |
+| profile (data-heavy)            | binary | 493 KiB | 19 µs   | 0.13 ms | ~24 GiB/s   | ~3.6 GiB/s  |
 
 Measured on an Apple M5 Max, Node.js 24, single thread.
 
