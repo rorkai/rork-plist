@@ -39,13 +39,13 @@
   "scripts": {
     "build": "tsdown",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p bench",
     "lint": "oxlint",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "checks": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "bench": "pnpm build && vitest bench --run",
-    "bench:compare": "pnpm build && node bench/compare.mjs",
+    "bench:compare": "pnpm build && node bench/compare.ts",
     "prepublishOnly": "pnpm checks"
   },
   "devDependencies": {
