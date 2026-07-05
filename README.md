@@ -75,10 +75,10 @@ Parses a binary (`bplist00`) property list explicitly, skipping the format sniff
 
 Both parsers accept the same options:
 
-| Option     | Default  | Description                                                                                                                                                                          |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Option     | Default  | Description                                                                                                                                                                     |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`     | `"copy"` | How binary `<data>` payloads relate to the input buffer: `"copy"` gives payloads that own their memory; `"view"` gives `subarray` views that alias the input and skip the copy. |
-| `maxDepth` | `512`   | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles.                                                                 |
+| `maxDepth` | `512`    | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles.                                                            |
 
 Use `data: "view"` to pull fields out of a large document you control and will not mutate — parsing a data-heavy document this way runs at the cost of the scan alone, with zero payload copying. The default stays `"copy"` because views cut both ways: writing through one corrupts the source bytes, and retaining one keeps the entire input buffer alive.
 
