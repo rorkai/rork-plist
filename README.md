@@ -50,7 +50,7 @@ pnpm add rork-plist
 Parses a property list into JavaScript values. `input` is `string | Uint8Array`:
 
 - a **string** is parsed as XML;
-- a **`Uint8Array`** is parsed as binary when it carries the `bplist00` magic, and otherwise decoded as UTF-8 and parsed as XML.
+- a **`Uint8Array`** is parsed as binary when it carries the `bplist00` magic, and otherwise decoded as XML text — UTF-8, or UTF-16 when a byte order mark announces it, the same encoding selection the reference parser applies.
 
 XML accepts complete documents (XML declaration, DOCTYPE, `<plist>` wrapper) as well as bare root elements.
 
@@ -130,7 +130,7 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 
 ## Behavior notes
 
-Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS.
+Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS. Beyond the fixtures, `pnpm corpus` sweeps the local machine's real property lists — tens of thousands of system, framework, and application files from bytes to tens of megabytes — parsing every one and cross-validating a stratified sample against `plutil` value by value.
 
 - **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects binary vs. XML from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
@@ -139,7 +139,7 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 - **Dates.** The wire layout is second-precision UTC (`2026-07-04T10:20:30Z`) — the only layout the reference parser accepts. Building truncates sub-second time.
 - **Data.** Corrupt base64 raises `PlistParseError` instead of decoding to a truncated payload. Empty data serializes as `<data></data>`, the form the reference parser accepts.
 - **Dictionaries.** Duplicate keys resolve to the last occurrence, matching the reference parser. A literal `__proto__` key becomes an own property; parsing untrusted documents cannot pollute prototypes. Building omits keys whose value is `undefined` (like `JSON.stringify`); a `null` value, or `undefined` in an array or at the root, is rejected instead.
-- **Tolerated input.** Comments, processing instructions, a DOCTYPE, attributes, a byte order mark, CDATA in strings, unpadded or whitespace-wrapped base64, missing `<plist>` wrappers, and content after `</plist>` are all accepted, mirroring the reference parser.
+- **Tolerated input.** Comments, processing instructions, a DOCTYPE, attributes (quoted or bare — shipped macOS plists spell `<plist version=1.0>`), a byte order mark, UTF-16 buffers (selected by their byte order mark, like the reference parser), CDATA in strings, unpadded or whitespace-wrapped base64, missing `<plist>` wrappers, and content after `</plist>` are all accepted.
 - **Output layout.** Documents are emitted in the reference writer's layout — header, `<plist version="1.0">`, root element at column zero, one indentation unit per level — so output diffs cleanly against Apple tool output.
 
 ## Performance
@@ -191,6 +191,7 @@ pnpm format        # oxfmt
 pnpm checks        # format check + lint + typecheck + test
 pnpm bench         # vitest bench
 pnpm bench:compare # cross-library comparison (see Performance)
+pnpm corpus        # sweep the machine's real plists against plutil (macOS)
 pnpm build         # tsdown → dist/
 ```
 

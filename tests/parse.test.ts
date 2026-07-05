@@ -257,8 +257,34 @@ test("ignores attributes on any element", () => {
   expect(parsePlist("<dict foo=\"bar\"><key>a</key><string x='y'>v</string></dict>")).toEqual({ a: "v" });
 });
 
+test("accepts unquoted attribute values, which Apple ships and the reference parser reads", () => {
+  // Found in the wild on shipped macOS system plists, spelled exactly like
+  // this in the XML declaration, the DOCTYPE, and the plist element.
+  const document =
+    "<?xml version=1.0 encoding=UTF-8?>\n" +
+    "<!DOCTYPE plist PUBLIC -//Apple//DTD PLIST 1.0//EN http://www.apple.com/DTDs/PropertyList-1.0.dtd>\n" +
+    "<plist version=1.0>\n<dict><key>a</key><string>v</string></dict>\n</plist>";
+
+  expect(parsePlist(document)).toEqual({ a: "v" });
+  expect(parsePlist("<string foo=bar/>")).toBe("");
+  expect(parsePlist("<string foo=bar>x</string>")).toBe("x");
+});
+
 test("ignores trailing content after the closing plist tag", () => {
   expect(parsePlist('<plist version="1.0"><string>x</string></plist>extra')).toBe("x");
+});
+
+test("stays linear when a reference sits deep in a text-dense document", () => {
+  // Every string element decodes a text range. If range decoding scanned
+  // ahead for '&' without remembering the answer, each of these ranges would
+  // rescan to the lone reference at the end and the parse would go
+  // quadratic — a shape real system plists hit at multiple megabytes. The
+  // 5-second test timeout fails the run if that regresses.
+  const doc = `<array>${"<string>x</string>".repeat(120_000)}<string>&amp;</string></array>`;
+  const parsed = parsePlist(doc) as string[];
+
+  expect(parsed).toHaveLength(120_001);
+  expect(parsed.at(-1)).toBe("&");
 });
 
 test("enforces the nesting depth limit", () => {

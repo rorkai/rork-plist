@@ -19,6 +19,23 @@ const execFileAsync = promisify(execFile);
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
 
 /**
+ * Encodes XML text as UTF-16 with a leading byte order mark, the encoding
+ * selection signal the reference parser honors for property list files.
+ *
+ * @param text The document text to encode.
+ * @param littleEndian Unit byte order; the mark announces the same order.
+ */
+function utf16Bytes(text: string, littleEndian: boolean): Uint8Array {
+  const out = new Uint8Array(2 + text.length * 2);
+  const view = new DataView(out.buffer);
+  view.setUint16(0, 0xfeff, littleEndian);
+  for (let i = 0; i < text.length; i++) {
+    view.setUint16(2 + i * 2, text.charCodeAt(i), littleEndian);
+  }
+  return out;
+}
+
+/**
  * Wraps a single hand-written object as a complete binary plist — magic, the
  * object at byte 8, a one-entry offset table, and a trailer. Every width is 1
  * byte, which is valid for any object under 256 bytes and keeps the malformed
@@ -148,6 +165,25 @@ describe("parsePlist auto-detection", () => {
     // Leads with '<' so the bplist magic check fails and the buffer takes the
     // XML-decode path; 0xff is never a valid UTF-8 byte.
     expect(() => parsePlist(new Uint8Array([0x3c, 0xff]))).toThrow(PlistParseError);
+  });
+
+  test("decodes UTF-16 buffers by their byte order mark", () => {
+    const doc = "<dict><key>name</key><string>Rørk 😀</string></dict>";
+
+    expect(parsePlist(utf16Bytes(doc, true))).toEqual({ name: "Rørk 😀" });
+    expect(parsePlist(utf16Bytes(doc, false))).toEqual({ name: "Rørk 😀" });
+  });
+
+  test("rejects UTF-16 that ends in a half code unit", () => {
+    const bytes = utf16Bytes("<string>x</string>", true);
+
+    expect(() => parsePlist(bytes.subarray(0, bytes.length - 1))).toThrow(/half code unit/u);
+  });
+
+  test("rejects UTF-16 without a byte order mark, like the reference parser", () => {
+    const bytes = utf16Bytes("<string>x</string>", true).subarray(2);
+
+    expect(() => parsePlist(bytes)).toThrow(PlistParseError);
   });
 });
 
@@ -317,6 +353,23 @@ describe.runIf(process.platform === "darwin")("plutil binary cross-validation", 
 
       expect(parseBinaryPlist(bytes)).toEqual(RICH_VALUE);
       expect(parsePlist(bytes)).toEqual(RICH_VALUE);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reads the same UTF-16 document plutil accepts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rork-plist-u16-"));
+    try {
+      const path = join(dir, "doc.plist");
+      const bytes = utf16Bytes(buildPlist({ name: "Rørk 😀", ok: true }), true);
+      await writeFile(path, bytes);
+      // plutil accepting the exact same bytes proves the encoding selection
+      // matches the platform, not just our own round trip.
+      const { stdout } = await execFileAsync("plutil", ["-convert", "xml1", "-o", "-", path]);
+
+      expect(parsePlist(bytes)).toEqual({ name: "Rørk 😀", ok: true });
+      expect(parsePlist(stdout)).toEqual({ name: "Rørk 😀", ok: true });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
