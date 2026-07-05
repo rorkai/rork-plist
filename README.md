@@ -95,6 +95,16 @@ Options:
 
 A dictionary key whose value is `undefined` is omitted, matching `JSON.stringify`, so optional and conditionally-set fields need no manual stripping. `PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value otherwise has no property list representation: `null`, `undefined` outside a dictionary value (a root or array `undefined`, since dropping an array element would shift indices), functions, class instances, `NaN`, infinities, lone surrogates, or characters XML 1.0 cannot carry.
 
+### `buildBinaryPlist(value)`
+
+Serializes a value as a binary (`bplist00`) property list, returning a `Uint8Array`. Scalars (including repeated dictionary keys) are deduplicated so the output stays compact. The value-model rules are identical to `buildPlist`, with two format-driven differences: dates keep full millisecond precision (binary stores a raw timestamp), and there is no four-digit-year limit. Circular references are detected and rejected.
+
+```ts
+import { buildBinaryPlist } from "rork-plist";
+
+const bytes = buildBinaryPlist({ device: "iPhone17,1", enabled: true });
+```
+
 ### `encodeBase64(bytes)` / `decodeBase64(text)`
 
 The strict RFC 4648 codec used for `<data>` elements, exported because protocol code usually needs one. `decodeBase64` tolerates whitespace and omitted padding but rejects everything else.
@@ -118,7 +128,7 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 
 Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS.
 
-- **Binary plists** (`bplist00`) are parse-only; building always emits XML, which every Apple parser reads. `parsePlist` auto-detects binary vs. XML from a buffer, or use `parseBinaryPlist` directly. UID objects (used by keyed archives, not plain property lists) are rejected; sets are read as arrays, matching how the platform tooling widens them.
+- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects binary vs. XML from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
 - **64-bit integers.** `<integer>` covers the full signed/unsigned 64-bit window `[-(2^63), 2^64 - 1]`; values beyond that fail to parse and to build. Values that exceed `Number.MAX_SAFE_INTEGER` parse as `bigint`, so identifiers and tokens never lose precision silently. Hexadecimal spellings (`0x1F`, `-0x10`) parse like the reference implementation.
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.

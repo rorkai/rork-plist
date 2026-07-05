@@ -283,12 +283,14 @@ class BinaryParser {
   /**
    * Resolves a `date` object: a big-endian double of seconds since the
    * property list date epoch (2001-01-01), shifted onto Unix time for the
-   * `Date`. Sub-second precision is preserved as milliseconds.
+   * `Date`. The result is rounded to the nearest millisecond — a `Date` holds
+   * integer milliseconds, so this recovers the intended value from the
+   * floating-point seconds representation rather than leaving a 1-ulp error.
    */
   private parseDate(offset: number): Date {
     this.requireBytes(offset + 1, 8);
     const secondsSinceEpoch = this.view.getFloat64(offset + 1);
-    return new Date((secondsSinceEpoch + PLIST_DATE_EPOCH_OFFSET_SECONDS) * 1000);
+    return new Date(Math.round((secondsSinceEpoch + PLIST_DATE_EPOCH_OFFSET_SECONDS) * 1000));
   }
 
   /**
