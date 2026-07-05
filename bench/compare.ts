@@ -247,16 +247,6 @@ for (const [name, { binary, openStep, openStepValue, value, xml }] of Object.ent
       ],
     ],
     [
-      "parse OpenStep",
-      [
-        ["rork-plist", () => parseOpenStepPlist(openStep)],
-        ["plist", () => plistParseOpenStep(openStep)],
-      ],
-    ],
-    // No package on npm writes OpenStep (the platform tooling cannot
-    // either), so this operation times rork-plist alone.
-    ["build OpenStep", [["rork-plist", () => buildOpenStepPlist(openStepValue)]]],
-    [
       "parse binary",
       [
         ["rork-plist", () => parseBinaryPlist(binary)],
@@ -273,6 +263,16 @@ for (const [name, { binary, openStep, openStepValue, value, xml }] of Object.ent
         ["bplist-creator", () => bplistCreator(value)],
       ],
     ],
+    [
+      "parse OpenStep",
+      [
+        ["rork-plist", () => parseOpenStepPlist(openStep)],
+        ["plist", () => plistParseOpenStep(openStep)],
+      ],
+    ],
+    // No package on npm writes OpenStep (the platform tooling cannot
+    // either), so this operation times rork-plist alone.
+    ["build OpenStep", [["rork-plist", () => buildOpenStepPlist(openStepValue)]]],
   ];
 
   console.log(
