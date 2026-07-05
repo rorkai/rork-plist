@@ -180,6 +180,8 @@ Binary reads beat XML reads because object lengths are explicit — nothing is s
 
 ## Development
 
+The published artifact runs on Node 20+; working on the repository needs Node 22.18+ (declared in `devEngines`), where the build toolchain is supported and the benchmarks run TypeScript through Node's native type stripping.
+
 ```sh
 pnpm install
 pnpm test          # vitest, including plutil cross-validation on macOS

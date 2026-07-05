@@ -14,31 +14,48 @@
  * every library equally. The reported figure is the median batch, in
  * nanoseconds per operation. Before timing, every library must round-trip
  * the fixture it is measured on.
+ *
+ * The script runs as TypeScript directly through Node's native type
+ * stripping, which is on by default in Node 22.18 and later.
  */
 /* oxlint-disable no-console -- printing results to stdout is this script's output */
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import expoPlistModule from "@expo/plist";
-import bplistCreator from "bplist-creator";
-import bplistParser from "bplist-parser";
 import {
   build as plistBuild,
   buildBinary as plistBuildBinary,
   parse as plistParse,
   parseBinary as plistParseBinary,
+  type PlistValue as PlistPackageValue,
 } from "plist";
 
-import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist } from "../dist/index.js";
+import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index.js";
 
-// @expo/plist ships a CommonJS default export that ESM sees double-wrapped.
-const expoPlist = expoPlistModule.default ?? expoPlistModule;
+// The remaining three libraries are CommonJS without usable ESM-facing types
+// (@expo/plist ships declarations that miss its double-wrapped default
+// export; the bplist packages ship none), so they load through require and
+// are typed here at the boundary.
+const require = createRequire(import.meta.url);
+
+const expoPlist = (
+  require("@expo/plist") as {
+    default: { build(value: unknown): string; parse(xml: string): unknown };
+  }
+).default;
+
+const bplistParser = require("bplist-parser") as {
+  parseBuffer(buffer: Buffer | Uint8Array): unknown[];
+};
+
+const bplistCreator = require("bplist-creator") as (value: unknown) => Buffer;
 
 /** Deterministic pseudo-random bytes, as a Buffer so every library accepts them. */
-function bytes(length, seed) {
+function bytes(length: number, seed: number): Buffer {
   const out = Buffer.alloc(length);
   let state = seed;
   for (let i = 0; i < length; i++) {
@@ -48,7 +65,7 @@ function bytes(length, seed) {
   return out;
 }
 
-const shapes = {
+const shapes: Record<string, PlistValue> = {
   "auth response": {
     Status: { ec: 0, ed: "Success", "server-info": "1.0" },
     spd: bytes(512, 1),
@@ -76,9 +93,16 @@ const shapes = {
   },
 };
 
+/** One document shape with its canonical XML and binary encodings. */
+interface Fixture {
+  binary: Uint8Array;
+  value: PlistValue;
+  xml: string;
+}
+
 /** Produces plutil-canonical fixture bytes on darwin, our own output elsewhere. */
-function makeFixtures() {
-  const fixtures = {};
+function makeFixtures(): Record<string, Fixture> {
+  const fixtures: Record<string, Fixture> = {};
   if (process.platform === "darwin") {
     const dir = mkdtempSync(join(tmpdir(), "rork-plist-compare-"));
     try {
@@ -89,7 +113,7 @@ function makeFixtures() {
         const binary = new Uint8Array(readFileSync(path));
         execFileSync("plutil", ["-convert", "xml1", path]);
         const xml = readFileSync(path, "utf8");
-        fixtures[name] = { value, xml, binary };
+        fixtures[name] = { binary, value, xml };
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -97,13 +121,13 @@ function makeFixtures() {
   } else {
     console.log("plutil is unavailable off macOS; fixtures use this library's writers\n");
     for (const [name, value] of Object.entries(shapes)) {
-      fixtures[name] = { value, xml: buildPlist(value), binary: buildBinaryPlist(value) };
+      fixtures[name] = { binary: buildBinaryPlist(value), value, xml: buildPlist(value) };
     }
   }
   return fixtures;
 }
 
-function batchNsPerOp(fn, iterations) {
+function batchNsPerOp(fn: () => unknown, iterations: number): number {
   const start = process.hrtime.bigint();
   for (let i = 0; i < iterations; i++) {
     fn();
@@ -111,22 +135,25 @@ function batchNsPerOp(fn, iterations) {
   return Number(process.hrtime.bigint() - start) / iterations;
 }
 
-function median(values) {
+function median(values: number[]): number {
   const sorted = values.toSorted((a, b) => a - b);
-  return sorted[sorted.length >> 1];
+  return sorted[sorted.length >> 1]!;
 }
 
 const BATCHES = 15;
 const TARGET_BATCH_NS = 60e6;
 
-/** Runs `[label, fn]` entries interleaved and returns `[label, nsPerOp]` pairs. */
-function compare(entries) {
+type Entry = [label: string, fn: () => unknown];
+type Result = [label: string, nsPerOp: number];
+
+/** Runs the entries interleaved and returns nanoseconds per operation each. */
+function compare(entries: Entry[]): Result[] {
   const calibrated = entries.map(([label, fn]) => {
     fn();
     const pilot = batchNsPerOp(fn, 3);
     const iterations = Math.max(3, Math.min(30_000, Math.round(TARGET_BATCH_NS / pilot)));
     batchNsPerOp(fn, Math.max(3, iterations >> 2));
-    return { fn, iterations, label, samples: [] };
+    return { fn, iterations, label, samples: [] as number[] };
   });
   for (let batch = 0; batch < BATCHES; batch++) {
     for (const entry of calibrated) {
@@ -136,7 +163,7 @@ function compare(entries) {
   return calibrated.map(({ label, samples }) => [label, median(samples)]);
 }
 
-function formatTime(ns) {
+function formatTime(ns: number): string {
   if (ns < 1e3) {
     return `${ns.toFixed(0)} ns`;
   }
@@ -149,12 +176,15 @@ function formatTime(ns) {
 const fixtures = makeFixtures();
 
 /** Geometric-mean multiplier vs rork-plist per operation, printed at the end. */
-const summary = new Map();
+const summary = new Map<string, number[]>();
 
-for (const [name, { value, xml, binary }] of Object.entries(fixtures)) {
+for (const [name, { binary, value, xml }] of Object.entries(fixtures)) {
   const buf = Buffer.from(binary.buffer, binary.byteOffset, binary.byteLength);
+  // The fixtures avoid the corners where the value models differ (no bigint,
+  // and data payloads are Buffers), so one runtime value serves every library.
+  const foreignValue = value as PlistPackageValue;
 
-  const operations = [
+  const operations: [operation: string, entries: Entry[]][] = [
     [
       "parse XML",
       [
@@ -167,7 +197,7 @@ for (const [name, { value, xml, binary }] of Object.entries(fixtures)) {
       "build XML",
       [
         ["rork-plist", () => buildPlist(value)],
-        ["plist", () => plistBuild(value)],
+        ["plist", () => plistBuild(foreignValue)],
         ["@expo/plist", () => expoPlist.build(value)],
       ],
     ],
@@ -184,7 +214,7 @@ for (const [name, { value, xml, binary }] of Object.entries(fixtures)) {
       "build binary",
       [
         ["rork-plist", () => buildBinaryPlist(value)],
-        ["plist", () => plistBuildBinary(value)],
+        ["plist", () => plistBuildBinary(foreignValue)],
         ["bplist-creator", () => bplistCreator(value)],
       ],
     ],
