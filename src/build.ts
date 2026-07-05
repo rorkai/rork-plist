@@ -226,12 +226,19 @@ class Builder {
    * Serializes a `Date` as a `<date>` element.
    *
    * The wire layout carries second precision; sub-second time is truncated
-   * rather than rounded so timestamps never move forward.
+   * rather than rounded so timestamps never move forward. The layout also
+   * fixes the year at four digits, so dates outside years 0000-9999 — which
+   * `toISOString` would render in the expanded `+YYYYYY` form — are rejected
+   * rather than emitted as text no plist parser accepts.
    */
   private appendDate(value: Date, path: string, depth: number): void {
     const time = value.getTime();
     if (Number.isNaN(time)) {
       throw new PlistBuildError("invalid Date cannot be written to a property list", path);
+    }
+    const year = value.getUTCFullYear();
+    if (year < 0 || year > 9999) {
+      throw new PlistBuildError(`year ${year} is outside the four-digit <date> range`, path);
     }
     const alignedTime = Math.floor(time / 1000) * 1000;
     const iso = (alignedTime === time ? value : new Date(alignedTime)).toISOString();

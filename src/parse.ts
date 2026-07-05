@@ -165,7 +165,13 @@ function parsePlistDate(text: string): Date | null {
     return null;
   }
 
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  // Built with the setter API rather than Date.UTC because Date.UTC remaps
+  // years 0-99 into 1900-1999; the setters take every year literally, and
+  // the reference parser accepts the full 0000-9999 range.
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+
   const roundTrips =
     date.getUTCFullYear() === year &&
     date.getUTCMonth() === month - 1 &&

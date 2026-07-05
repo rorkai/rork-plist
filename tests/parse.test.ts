@@ -185,6 +185,13 @@ describe("dates", () => {
   test("accepts leap-day dates", () => {
     expect(parsePlist("<date>2028-02-29T00:00:00Z</date>")).toEqual(new Date(Date.UTC(2028, 1, 29)));
   });
+
+  test("preserves years 0000-0099 instead of remapping them to 1900-1999", () => {
+    const parsed = parsePlist("<date>0050-01-01T00:00:00Z</date>");
+
+    assert(parsed instanceof Date);
+    expect(parsed.getUTCFullYear()).toBe(50);
+  });
 });
 
 describe("data", () => {

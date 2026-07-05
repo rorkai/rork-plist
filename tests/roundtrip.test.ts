@@ -43,21 +43,26 @@ test("round-trips randomized documents", () => {
   };
 
   const randomValue = (depth: number): PlistValue => {
-    const choice = Math.floor(random() * (depth > 3 ? 6 : 8));
+    const choice = Math.floor(random() * (depth > 3 ? 7 : 9));
     switch (choice) {
       case 0:
         return `s${Math.floor(random() * 1e9)}&<>"'\u00E9`;
       case 1:
         return Math.floor(random() * 2 ** 40) - 2 ** 39;
-      case 2:
-        return random() < 0.5 ? random() * 1000 - 500 : Math.floor(random() * 100) + 0.5;
+      case 2: {
+        // Above Number.MAX_SAFE_INTEGER so the bigint path is exercised.
+        const magnitude = 9_007_199_254_740_993n + BigInt(Math.floor(random() * 1e9));
+        return random() < 0.5 ? magnitude : -magnitude;
+      }
       case 3:
-        return random() < 0.5;
+        return random() < 0.5 ? random() * 1000 - 500 : Math.floor(random() * 100) + 0.5;
       case 4:
-        return new Date(Math.floor((random() * 4e12) / 1000) * 1000);
+        return random() < 0.5;
       case 5:
-        return new Uint8Array(Math.floor(random() * 24)).map(() => Math.floor(random() * 256));
+        return new Date(Math.floor((random() * 4e12) / 1000) * 1000);
       case 6:
+        return new Uint8Array(Math.floor(random() * 24)).map(() => Math.floor(random() * 256));
+      case 7:
         return Array.from({ length: Math.floor(random() * 5) }, () => randomValue(depth + 1));
       default: {
         const dict: Record<string, PlistValue> = {};

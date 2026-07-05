@@ -115,6 +115,26 @@ describe("dates", () => {
   test("rejects invalid dates", () => {
     expect(() => buildPlist(new Date(NaN))).toThrow(PlistBuildError);
   });
+
+  test("rejects dates outside the four-digit year range", () => {
+    // toISOString renders these in the expanded +YYYYYY form, which the
+    // <date> layout cannot carry.
+    const tenThousand = new Date(0);
+    tenThousand.setUTCFullYear(10_000, 0, 1);
+    const negative = new Date(0);
+    negative.setUTCFullYear(-1, 0, 1);
+
+    expect(() => buildPlist(tenThousand)).toThrow(PlistBuildError);
+    expect(() => buildPlist(negative)).toThrow(PlistBuildError);
+  });
+
+  test("round-trips early four-digit years", () => {
+    const early = new Date(0);
+    early.setUTCFullYear(50, 0, 1);
+    early.setUTCHours(0, 0, 0, 0);
+
+    expect(buildPlist(early, { indent: false })).toContain("<date>0050-01-01T00:00:00Z</date>");
+  });
 });
 
 describe("binary data", () => {

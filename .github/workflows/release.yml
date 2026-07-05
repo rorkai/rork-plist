@@ -20,6 +20,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -27,11 +29,14 @@ jobs:
           registry-url: https://registry.npmjs.org
       - name: Verify the release tag matches package.json
         if: github.event_name == 'release'
+        # The tag name is event-controlled input; it reaches the script only
+        # through the environment, never through template expansion.
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           package_version="v$(node -p "require('./package.json').version")"
-          tag_name="${{ github.event.release.tag_name }}"
-          if [ "$package_version" != "$tag_name" ]; then
-            echo "package.json is $package_version but the release tag is $tag_name" >&2
+          if [ "$package_version" != "$TAG_NAME" ]; then
+            echo "package.json is $package_version but the release tag is $TAG_NAME" >&2
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
