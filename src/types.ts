@@ -48,7 +48,8 @@ export interface PlistArray extends Array<PlistValue> {}
  * Duplicate keys in a parsed document resolve to the last occurrence,
  * matching the reference parser. A literal `__proto__` key is always stored
  * as an own property, so parsing untrusted documents cannot pollute
- * prototypes.
+ * prototypes. When building, a key whose value is `undefined` is omitted
+ * (as `JSON.stringify` does), so optional fields need no manual stripping.
  */
 export interface PlistDictionary {
   [key: string]: PlistValue;

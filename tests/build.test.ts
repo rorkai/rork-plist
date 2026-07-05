@@ -1,4 +1,4 @@
-import { buildPlist, PlistBuildError, type PlistValue } from "../src/index";
+import { buildPlist, parsePlist, PlistBuildError, type PlistValue } from "../src/index";
 
 const HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -157,10 +157,47 @@ describe("binary data", () => {
   });
 });
 
-describe("unrepresentable values", () => {
-  test("rejects null and undefined with the value path", () => {
-    expect(() => buildPlist({ outer: [null] } as never)).toThrow("at $.outer[0]");
+describe("undefined omission", () => {
+  // `PlistValue` forbids undefined values, so these mirror a loosely typed
+  // caller (a JSON-API object, an index-signature read) reaching the builder.
+  test("drops dictionary keys whose value is undefined, like JSON.stringify", () => {
+    const xml = buildPlist({ kept: "yes", dropped: undefined, also: 1 } as never, { indent: false });
+
+    expect(xml).toContain("<key>kept</key><string>yes</string>");
+    expect(xml).toContain("<key>also</key><integer>1</integer>");
+    expect(xml).not.toContain("dropped");
+  });
+
+  test("collapses a dictionary of only undefined values to an empty dict", () => {
+    expect(buildPlist({ a: undefined, b: undefined } as never, { indent: false })).toContain("<dict/>");
+  });
+
+  test("omits undefined in nested dictionaries", () => {
+    const xml = buildPlist({ outer: { keep: true, drop: undefined } } as never, { indent: false });
+
+    expect(xml).toContain("<key>keep</key><true/>");
+    expect(xml).not.toContain("drop");
+  });
+
+  test("round-trips a dictionary with an undefined value as the omitted shape", () => {
+    expect(parsePlist(buildPlist({ present: 42, absent: undefined } as never))).toEqual({ present: 42 });
+  });
+
+  test("rejects undefined array elements instead of shifting indices", () => {
+    // Unlike a dictionary key, dropping an array element would silently
+    // renumber everything after it, so undefined in an array is an error.
+    expect(() => buildPlist([1, undefined, 3] as never)).toThrow("at $[1]");
+  });
+
+  test("rejects undefined at the document root", () => {
     expect(() => buildPlist(undefined as never)).toThrow("at $");
+  });
+});
+
+describe("unrepresentable values", () => {
+  test("rejects null with the value path, including inside arrays", () => {
+    expect(() => buildPlist({ outer: [null] } as never)).toThrow("at $.outer[0]");
+    expect(() => buildPlist(null as never)).toThrow("at $");
   });
 
   test("rejects class instances", () => {

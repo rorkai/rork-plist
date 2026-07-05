@@ -81,7 +81,7 @@ Options:
 | -------- | ------- | ---------------------------------------------------- |
 | `indent` | `"\t"`  | Indentation unit, or `false` for a single-line body. |
 
-`PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value has no property list representation: `null`, `undefined`, functions, class instances, `NaN`, infinities, lone surrogates, or characters XML 1.0 cannot carry.
+A dictionary key whose value is `undefined` is omitted, matching `JSON.stringify`, so optional and conditionally-set fields need no manual stripping. `PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value otherwise has no property list representation: `null`, `undefined` outside a dictionary value (a root or array `undefined`, since dropping an array element would shift indices), functions, class instances, `NaN`, infinities, lone surrogates, or characters XML 1.0 cannot carry.
 
 ### `encodeBase64(bytes)` / `decodeBase64(text)`
 
@@ -108,7 +108,7 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.
 - **Dates.** The wire layout is second-precision UTC (`2026-07-04T10:20:30Z`) — the only layout the reference parser accepts. Building truncates sub-second time.
 - **Data.** Corrupt base64 raises `PlistParseError` instead of decoding to a truncated payload. Empty data serializes as `<data></data>`, the form the reference parser accepts.
-- **Dictionaries.** Duplicate keys resolve to the last occurrence, matching the reference parser. A literal `__proto__` key becomes an own property; parsing untrusted documents cannot pollute prototypes.
+- **Dictionaries.** Duplicate keys resolve to the last occurrence, matching the reference parser. A literal `__proto__` key becomes an own property; parsing untrusted documents cannot pollute prototypes. Building omits keys whose value is `undefined` (like `JSON.stringify`); a `null` value, or `undefined` in an array or at the root, is rejected instead.
 - **Tolerated input.** Comments, processing instructions, a DOCTYPE, attributes, a byte order mark, CDATA in strings, unpadded or whitespace-wrapped base64, missing `<plist>` wrappers, and content after `</plist>` are all accepted, mirroring the reference parser.
 - **Output layout.** Documents are emitted in the reference writer's layout — header, `<plist version="1.0">`, root element at column zero, one indentation unit per level — so output diffs cleanly against Apple tool output.
 

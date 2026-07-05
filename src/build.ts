@@ -11,7 +11,10 @@
  *
  * Serialization is strict where silence would hide bugs: values with no
  * property list representation raise {@link PlistBuildError} carrying the
- * path of the offending value instead of being skipped or coerced.
+ * path of the offending value instead of being skipped or coerced. The one
+ * deliberate omission mirrors `JSON.stringify` — a dictionary key whose
+ * value is `undefined` is dropped — because an optional field that was never
+ * set carries no intent worth preserving.
  *
  * @module
  */
@@ -32,7 +35,7 @@ import {
   TAB,
 } from "./internal/character-codes";
 import { PLIST_INTEGER_MAX, PLIST_INTEGER_MIN } from "./internal/integer-range";
-import type { PlistValue } from "./types";
+import type { PlistDictionary, PlistValue } from "./types";
 
 /**
  * Options accepted by {@link buildPlist}.
@@ -64,14 +67,23 @@ const XML_HEADER =
  * and the `<plist version="1.0">` wrapper. See {@link PlistValue} for the
  * value mapping and {@link BuildPlistOptions} for layout control.
  *
+ * A dictionary key whose value is `undefined` is omitted, matching how
+ * `JSON.stringify` drops `undefined` object properties, so optional and
+ * conditionally-assigned fields need no manual stripping. `undefined`
+ * anywhere else — the root value or an array element — has no representation
+ * and is rejected, because dropping an array element would silently shift
+ * every following index. `null` is always rejected: the property list format
+ * has no null, and unlike `undefined` a literal `null` signals intent that
+ * silent omission would erase.
+ *
  * @param value The root value to serialize.
  * @param options See {@link BuildPlistOptions}.
  * @returns The document text, terminated by a newline.
  * @throws PlistBuildError when a value has no property list representation:
- *   `null`, `undefined`, functions, symbols, class instances, `NaN`,
- *   infinities, out-of-range bigints, invalid dates, lone surrogates, or
- *   characters XML 1.0 cannot carry. The error names the path of the
- *   offending value, e.g. `$.profiles[2].name`.
+ *   `null`, `undefined` (outside a dictionary value), functions, symbols,
+ *   class instances, `NaN`, infinities, out-of-range bigints, invalid dates,
+ *   lone surrogates, or characters XML 1.0 cannot carry. The error names the
+ *   path of the offending value, e.g. `$.profiles[2].name`.
  */
 export function buildPlist(value: PlistValue, options: BuildPlistOptions = {}): string {
   const indent = options.indent ?? "\t";
@@ -111,10 +123,10 @@ class Builder {
    *
    * The parameter deliberately admits `null` and `undefined` even though
    * {@link PlistValue} excludes them: loosely typed callers can smuggle both
-   * past the public signature, and dictionary iteration reads properties the
-   * compiler cannot verify. Accepting the unsafe shapes here and rejecting
-   * them with path context keeps every call site free of casts and non-null
-   * assertions while preserving the loud failure.
+   * past the public signature, and array iteration reads elements the
+   * compiler cannot verify. Both are rejected here with path context —
+   * `undefined` is only omitted at dictionary keys, which {@link appendDict}
+   * handles before ever calling this method.
    *
    * @param value Value to serialize.
    * @param path Path from the root for error reporting, e.g. `$.items[3]`.
@@ -205,19 +217,30 @@ class Builder {
       throw new PlistBuildError("class instances have no property list representation", path);
     }
 
-    // Reading through an index signature yields `PlistValue | undefined`
-    // under noUncheckedIndexedAccess; appendValue accepts exactly that shape
-    // and turns a runtime undefined into a path-carrying error.
+    this.appendDict(value, path, depth);
+  }
+
+  /**
+   * Serializes a plain object as a `<dict>` element.
+   *
+   * Keys whose value is `undefined` are omitted, matching `JSON.stringify`;
+   * a dictionary with no remaining keys collapses to `<dict/>`. Reading
+   * through the index signature yields `PlistValue | undefined` under
+   * `noUncheckedIndexedAccess`, which the `undefined` filter narrows away
+   * before serialization.
+   */
+  private appendDict(value: PlistDictionary, path: string, depth: number): void {
     const record: Record<string, PlistValue | undefined> = value;
-    const keys = Object.keys(record);
+    const keys = Object.keys(record).filter((key) => record[key] !== undefined);
     if (keys.length === 0) {
       this.appendLine(depth, "<dict/>");
       return;
     }
     this.appendLine(depth, "<dict>");
     for (const key of keys) {
+      const entryValue = record[key];
       this.appendLine(depth + 1, `<key>${escapeText(key, path)}</key>`);
-      this.appendValue(record[key], `${path}.${key}`, depth + 1);
+      this.appendValue(entryValue, `${path}.${key}`, depth + 1);
     }
     this.appendLine(depth, "</dict>");
   }
