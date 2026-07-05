@@ -14,8 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  // bench/ is excluded on purpose: benchmarks import the built artifact in
-  // dist/, so including them would make a fresh-checkout `pnpm typecheck`
-  // fail until a build runs. `pnpm bench` builds first and surfaces breakage.
   "include": ["src", "tests", "tsdown.config.ts", "vitest.config.ts"]
 }
