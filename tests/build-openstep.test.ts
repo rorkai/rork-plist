@@ -12,7 +12,6 @@ import {
   PlistBuildError,
   type PlistValue,
 } from "../src/index";
-import { describe, test } from "node:test";
 
 const execFileAsync = promisify(execFile);
 
