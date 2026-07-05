@@ -41,9 +41,11 @@ jobs:
       # Build, format check, lint, typecheck, and the full test suite.
       - run: pnpm checks
       # Catch packaging mistakes (missing files, broken exports) before a
-      # release does.
+      # release does. `pnpm pack` assembles the tarball without contacting the
+      # registry — unlike `publish --dry-run`, which refuses once the current
+      # version is already published and would fail every push to main.
       - if: matrix.os == 'ubuntu-latest' && matrix.node == 24
-        run: pnpm publish --dry-run --no-git-checks
+        run: pnpm pack --pack-destination "$RUNNER_TEMP"
 
   # The engines floor is a runtime claim about the published artifact, not
   # about the contributor toolchain — build on a current Node, then execute
