@@ -3,7 +3,9 @@
  *
  * {@link parsePlist} is the public entry. It takes an XML string, or a buffer
  * that it routes to the binary parser (see {@link "./parse-binary"}) or
- * decodes as UTF-8 XML. The XML parser itself is a hand-written
+ * decodes as XML text — UTF-8, or UTF-16 when a byte order mark says so, the
+ * same encoding selection the reference parser applies. The XML parser
+ * itself is a hand-written
  * recursive-descent scanner over the property list grammar rather than a
  * general XML parser. The plist DTD is a closed vocabulary of ten elements
  * with no meaningful attributes, so a dedicated scanner is both faster and
@@ -70,6 +72,65 @@ export type { ParsePlistOptions } from "./parse-options";
  * into silently mangled string values.
  */
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * Decodes a non-binary plist buffer to text, selecting the encoding the way
+ * the reference parser does — by byte order mark alone. `FF FE` decodes as
+ * UTF-16 little-endian and `FE FF` as UTF-16 big-endian; everything else
+ * decodes as UTF-8. The XML declaration's `encoding` attribute is ignored,
+ * and BOM-less UTF-16 is rejected, both verified against the platform
+ * tooling, which behaves the same way.
+ */
+function decodeXmlBytes(input: Uint8Array): string {
+  if (input.length >= 2) {
+    if (input[0] === 0xff && input[1] === 0xfe) {
+      return decodeUtf16(input, true);
+    }
+    if (input[0] === 0xfe && input[1] === 0xff) {
+      return decodeUtf16(input, false);
+    }
+  }
+  try {
+    return utf8Decoder.decode(input);
+  } catch {
+    // TextDecoder throws a TypeError on invalid UTF-8; surface it as the
+    // library's own parse error so callers catch one type either way.
+    throw new PlistParseError("input is not valid UTF-8", input, 0);
+  }
+}
+
+/**
+ * Decodes UTF-16 text following its two-byte byte order mark. The decoder is
+ * hand-rolled rather than a `TextDecoder` because the UTF-16 labels are not
+ * required to exist in every runtime this library supports; code units pass
+ * through to the JS string (itself UTF-16) unchanged.
+ *
+ * @param input The whole buffer, including the byte order mark.
+ * @param littleEndian Unit byte order, as announced by the mark.
+ */
+function decodeUtf16(input: Uint8Array, littleEndian: boolean): string {
+  const byteLength = input.byteLength - 2;
+  if (byteLength % 2 !== 0) {
+    throw new PlistParseError("UTF-16 input ends in a half code unit", input, input.byteLength - 1);
+  }
+  const view = new DataView(input.buffer, input.byteOffset + 2, byteLength);
+  const unitCount = byteLength / 2;
+  const units: number[] = [];
+  let out = "";
+  for (let i = 0; i < unitCount; i++) {
+    units.push(view.getUint16(i * 2, littleEndian));
+    // Flushing in chunks keeps the argument list small enough to spread while
+    // avoiding a per-unit string concatenation on megabyte documents.
+    if (units.length === 4096) {
+      out += String.fromCharCode(...units);
+      units.length = 0;
+    }
+  }
+  if (units.length > 0) {
+    out += String.fromCharCode(...units);
+  }
+  return out;
+}
 
 /** Decimal or `0x`-prefixed hexadecimal digits with an optional sign. */
 const INTEGER_PATTERN = /^[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)$/u;
@@ -198,9 +259,9 @@ interface OpenTag {
  *
  * Accepts both formats. A `string` is always parsed as XML. A `Uint8Array` is
  * parsed as binary (`bplist00`) when it carries the binary magic, and
- * otherwise decoded as UTF-8 and parsed as XML — so a caller holding raw bytes
- * (a file read, an HTTP body) can pass them through without sniffing the
- * format first.
+ * otherwise decoded as XML text — UTF-8, or UTF-16 when a byte order mark
+ * announces it — so a caller holding raw bytes (a file read, an HTTP body)
+ * can pass them through without sniffing the format or encoding first.
  *
  * XML parsing accepts complete documents — XML declaration, DOCTYPE, comments,
  * a `<plist>` wrapper — as well as bare root elements, mirroring the reference
@@ -228,15 +289,7 @@ export function parsePlist(input: string | Uint8Array, options: ParsePlistOption
     if (hasBinaryPlistMagic(input)) {
       return parseBinaryPlist(input, options);
     }
-    let xml: string;
-    try {
-      xml = utf8Decoder.decode(input);
-    } catch {
-      // TextDecoder throws a TypeError on invalid UTF-8; surface it as the
-      // library's own parse error so callers catch one type either way.
-      throw new PlistParseError("input is not valid UTF-8", input, 0);
-    }
-    return parseXml(xml, options);
+    return parseXml(decodeXmlBytes(input), options);
   }
   return parseXml(input, options);
 }
@@ -257,6 +310,19 @@ function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
 class Parser {
   /** Current offset into {@link src}; only ever moves forward. */
   private pos = 0;
+
+  /**
+   * Position of the next `&` at or ahead of the text being decoded, or -1
+   * once none remains; -2 until the first scan. Text decoding must know
+   * whether a range contains a reference, but `indexOf` has no end bound —
+   * without this memo, every reference-free range would scan to the next
+   * `&` anywhere in the document (possibly megabytes ahead, possibly the
+   * end), turning reference-sparse documents quadratic. The parser only
+   * moves forward, so remembering the last hit keeps the total scan linear;
+   * a multi-megabyte real-world document measured 25 seconds without the
+   * memo and milliseconds with it.
+   */
+  private nextAmpersandMemo = -2;
 
   /**
    * @param src Source text of the document.
@@ -688,15 +754,42 @@ class Parser {
         this.pos++;
         this.skipWhitespace();
         const quote = src.charCodeAt(this.pos);
-        if (quote !== DOUBLE_QUOTE && quote !== APOSTROPHE) {
-          this.fail(`attribute ${attributeName} in <${name}> is missing a quoted value`, start);
+        if (quote === DOUBLE_QUOTE || quote === APOSTROPHE) {
+          const valueEnd = src.indexOf(String.fromCharCode(quote), this.pos + 1);
+          if (valueEnd < 0) {
+            this.fail(`unterminated attribute value in <${name}>`, start);
+          }
+          this.pos = valueEnd + 1;
+        } else {
+          this.skipBareAttributeValue(attributeName, name, start);
         }
-        const valueEnd = src.indexOf(String.fromCharCode(quote), this.pos + 1);
-        if (valueEnd < 0) {
-          this.fail(`unterminated attribute value in <${name}>`, start);
-        }
-        this.pos = valueEnd + 1;
       }
+    }
+  }
+
+  /**
+   * Skips one unquoted attribute value token. Unquoted values are not
+   * well-formed XML, but Apple ships plists spelled `<plist version=1.0>`
+   * and the reference parser accepts them, so the bare token is scanned and
+   * discarded like any quoted value would be. A `/` only terminates the
+   * token when it closes the tag.
+   */
+  private skipBareAttributeValue(attributeName: string, elementName: string, start: number): void {
+    const src = this.src;
+    const tokenStart = this.pos;
+    while (this.pos < src.length) {
+      const code = src.charCodeAt(this.pos);
+      if (
+        isWhitespaceCode(code) ||
+        code === GREATER_THAN ||
+        (code === SLASH && src.charCodeAt(this.pos + 1) === GREATER_THAN)
+      ) {
+        break;
+      }
+      this.pos++;
+    }
+    if (this.pos === tokenStart) {
+      this.fail(`attribute ${attributeName} in <${elementName}> is missing a value`, start);
     }
   }
 
@@ -844,6 +937,22 @@ class Parser {
   }
 
   /**
+   * Returns the position of the first `&` at or after `start`, remembering
+   * the answer so ranges the parser has already moved past never rescan.
+   * See {@link nextAmpersandMemo} for why this must not be a plain
+   * `indexOf` per range.
+   */
+  private nextAmpersand(start: number): number {
+    if (this.nextAmpersandMemo === -1) {
+      return -1;
+    }
+    if (this.nextAmpersandMemo < start) {
+      this.nextAmpersandMemo = this.src.indexOf("&", start);
+    }
+    return this.nextAmpersandMemo;
+  }
+
+  /**
    * Decodes `src[start, end)`, resolving `&...;` references.
    *
    * The overwhelmingly common case — text with no ampersand at all — is a
@@ -851,7 +960,7 @@ class Parser {
    */
   private decodeTextRange(start: number, end: number): string {
     const src = this.src;
-    let amp = src.indexOf("&", start);
+    let amp = this.nextAmpersand(start);
     if (amp < 0 || amp >= end) {
       return src.slice(start, end);
     }
@@ -866,7 +975,8 @@ class Parser {
       }
       out += this.resolveReference(src.slice(amp + 1, semi), amp);
       cursor = semi + 1;
-      amp = src.indexOf("&", cursor);
+      this.nextAmpersandMemo = src.indexOf("&", cursor);
+      amp = this.nextAmpersandMemo;
     }
     return out + src.slice(cursor, end);
   }

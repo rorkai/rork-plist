@@ -46,6 +46,7 @@
     "checks": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "bench": "pnpm build && vitest bench --run",
     "bench:compare": "pnpm build && node bench/compare.ts",
+    "corpus": "pnpm build && node bench/corpus.ts",
     "prepublishOnly": "pnpm checks"
   },
   "devDependencies": {
