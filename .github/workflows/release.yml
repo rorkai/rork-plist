@@ -1,0 +1,40 @@
+# Publishes the package to npm when a GitHub release is published.
+#
+# Publishing uses npm trusted publishing (OIDC) — no long-lived token is
+# stored in this repository — and attaches build provenance. The job runs on
+# macOS so the prepublish gate includes the plutil cross-validation suite.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for npm trusted publishing and --provenance attestation.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Verify the release tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          package_version="v$(node -p "require('./package.json').version")"
+          tag_name="${{ github.event.release.tag_name }}"
+          if [ "$package_version" != "$tag_name" ]; then
+            echo "package.json is $package_version but the release tag is $tag_name" >&2
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      # prepublishOnly runs the full gate (build, format, lint, typecheck,
+      # tests including plutil cross-validation) before anything uploads.
+      - run: pnpm publish --provenance --access public --no-git-checks

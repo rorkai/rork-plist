@@ -1,0 +1,42 @@
+# Full verification gate for pull requests and main.
+#
+# The matrix covers both operating systems on purpose: macOS runs the plutil
+# cross-validation suite (the empirical ground truth for what Apple parsers
+# accept), while Linux exercises the portable code paths.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: checks (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build, format check, lint, typecheck, and the full test suite.
+      - run: pnpm checks
+      # Catch packaging mistakes (missing files, broken exports) before a
+      # release does.
+      - if: matrix.os == 'ubuntu-latest' && matrix.node == 24
+        run: pnpm publish --dry-run --no-git-checks

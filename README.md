@@ -1,5 +1,8 @@
 # rork-plist
 
+[![CI](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml/badge.svg)](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/rork-plist)](https://www.npmjs.com/package/rork-plist)
+
 Zero-dependency Apple property list (plist) parser and builder for JavaScript, built to behave identically in every runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
 
 ```ts
@@ -117,11 +120,11 @@ Run benchmarks with `pnpm bench`; it builds first and measures the published art
   <img src="assets/performance.svg" alt="Benchmark table: an auth response parses in 3.4 microseconds and builds in 1.1 microseconds; a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds; a binary-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds" width="880" />
 </p>
 
-| Document                        | Size    | Parse   | Build  | Parse speed | Build speed |
-| ------------------------------- | ------- | ------- | ------ | ----------- | ----------- |
-| auth response                   | 1.5 KiB | 3.4 µs  | 1.1 µs | ~430 MiB/s  | ~1.2 GiB/s  |
-| device list (500 dated entries) | 179 KiB | 0.72 ms | 0.42 ms | ~240 MiB/s | ~420 MiB/s |
-| profile (binary-heavy)          | 658 KiB | 0.71 ms | 79 µs  | ~900 MiB/s  | ~7.9 GiB/s  |
+| Document                        | Size    | Parse   | Build   | Parse speed | Build speed |
+| ------------------------------- | ------- | ------- | ------- | ----------- | ----------- |
+| auth response                   | 1.5 KiB | 3.4 µs  | 1.1 µs  | ~430 MiB/s  | ~1.2 GiB/s  |
+| device list (500 dated entries) | 179 KiB | 0.72 ms | 0.42 ms | ~240 MiB/s  | ~420 MiB/s  |
+| profile (binary-heavy)          | 658 KiB | 0.71 ms | 79 µs   | ~900 MiB/s  | ~7.9 GiB/s  |
 
 Measured on an Apple M5 Max, Node.js 24, single thread.
 
@@ -149,6 +152,18 @@ The layout follows the usual conventions: the public API lives in `src/` with
 one module per concern (`parse`, `build`, `base64`, `errors`, `types`),
 shared non-exported helpers live in `src/internal/`, tests live in `tests/`
 and exercise the public entry point, and benchmarks live in `bench/`.
+
+CI runs the same `pnpm checks` gate on Linux and macOS; the macOS jobs
+include the plutil cross-validation suite.
+
+## Releasing
+
+Releases publish to npm from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements) via [trusted publishing](https://docs.npmjs.com/trusted-publishers) — no long-lived tokens are stored in the repository.
+
+1. Bump `version` in `package.json` and merge to `main`.
+2. Create a GitHub release with a `vX.Y.Z` tag matching the new version.
+3. The release workflow verifies the tag, runs the full gate (including
+   plutil cross-validation on the macOS runner), and publishes.
 
 ## License
 
