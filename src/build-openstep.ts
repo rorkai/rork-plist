@@ -29,6 +29,14 @@ import { isOpenStepBareCode } from "./parse-openstep";
 import type { PlistDictionary, PlistValue } from "./types";
 
 /**
+ * The 256 two-digit lowercase hex spellings, indexed by byte value. Data
+ * payloads can reach hundreds of kilobytes, and formatting each byte through
+ * `toString(16)` plus padding measured as the dominant cost of data-heavy
+ * builds; a table lookup per byte removes both allocations.
+ */
+const HEX_PAIRS = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"));
+
+/**
  * Options accepted by {@link buildOpenStepPlist}.
  */
 export interface BuildOpenStepPlistOptions {
@@ -148,7 +156,7 @@ class OpenStepBuilder {
       if (i > 0 && i % 4 === 0) {
         out += " ";
       }
-      out += bytes[i]!.toString(16).padStart(2, "0");
+      out += HEX_PAIRS[bytes[i]!]!;
     }
     this.out += `${out}>`;
   }

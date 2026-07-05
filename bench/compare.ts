@@ -106,6 +106,8 @@ const shapes: Record<string, PlistValue> = {
 interface Fixture {
   binary: Uint8Array;
   openStep: string;
+  /** The shape rewritten into OpenStep's untyped value model. */
+  openStepValue: PlistValue;
   value: PlistValue;
   xml: string;
 }
@@ -140,7 +142,8 @@ function makeFixtures(): Record<string, Fixture> {
     try {
       for (const [name, value] of Object.entries(shapes)) {
         const path = join(dir, "doc.plist");
-        const openStep = buildOpenStepPlist(stringifyLeaves(value));
+        const openStepValue = stringifyLeaves(value);
+        const openStep = buildOpenStepPlist(openStepValue);
         writeFileSync(path, openStep);
         execFileSync("plutil", ["-lint", path]);
         writeFileSync(path, buildPlist(value));
@@ -148,7 +151,7 @@ function makeFixtures(): Record<string, Fixture> {
         const binary = new Uint8Array(readFileSync(path));
         execFileSync("plutil", ["-convert", "xml1", path]);
         const xml = readFileSync(path, "utf8");
-        fixtures[name] = { binary, openStep, value, xml };
+        fixtures[name] = { binary, openStep, openStepValue, value, xml };
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -156,9 +159,11 @@ function makeFixtures(): Record<string, Fixture> {
   } else {
     console.log("plutil is unavailable off macOS; fixtures use this library's writers\n");
     for (const [name, value] of Object.entries(shapes)) {
+      const openStepValue = stringifyLeaves(value);
       fixtures[name] = {
         binary: buildBinaryPlist(value),
-        openStep: buildOpenStepPlist(stringifyLeaves(value)),
+        openStep: buildOpenStepPlist(openStepValue),
+        openStepValue,
         value,
         xml: buildPlist(value),
       };
@@ -218,7 +223,7 @@ const fixtures = makeFixtures();
 /** Geometric-mean multiplier vs rork-plist per operation, printed at the end. */
 const summary = new Map<string, number[]>();
 
-for (const [name, { binary, openStep, value, xml }] of Object.entries(fixtures)) {
+for (const [name, { binary, openStep, openStepValue, value, xml }] of Object.entries(fixtures)) {
   const buf = Buffer.from(binary.buffer, binary.byteOffset, binary.byteLength);
   // The fixtures avoid the corners where the value models differ (no bigint,
   // and data payloads are Buffers), so one runtime value serves every library.
@@ -248,6 +253,9 @@ for (const [name, { binary, openStep, value, xml }] of Object.entries(fixtures))
         ["plist", () => plistParseOpenStep(openStep)],
       ],
     ],
+    // No package on npm writes OpenStep (the platform tooling cannot
+    // either), so this operation times rork-plist alone.
+    ["build OpenStep", [["rork-plist", () => buildOpenStepPlist(openStepValue)]]],
     [
       "parse binary",
       [

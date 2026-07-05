@@ -164,7 +164,7 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 
 ## Performance
 
-`rork-plist` is measured against the most-used plist packages on npm — [`plist`](https://www.npmjs.com/package/plist) (XML, binary, and OpenStep), [`@expo/plist`](https://www.npmjs.com/package/@expo/plist) (XML), and [`bplist-parser`](https://www.npmjs.com/package/bplist-parser) / [`bplist-creator`](https://www.npmjs.com/package/bplist-creator) (binary) — on three representative documents, using fixtures canonicalized by Apple's own `plutil` so no parser reads its own writer's output. It is the fastest across every operation and format, with zero dependencies.
+`rork-plist` is measured against the most-used plist packages on npm — [`plist`](https://www.npmjs.com/package/plist) (XML, binary, and OpenStep parsing), [`@expo/plist`](https://www.npmjs.com/package/@expo/plist) (XML), and [`bplist-parser`](https://www.npmjs.com/package/bplist-parser) / [`bplist-creator`](https://www.npmjs.com/package/bplist-creator) (binary) — on three representative documents, using fixtures canonicalized by Apple's own `plutil` so no parser reads its own writer's output. It is the fastest across every operation and format, with zero dependencies — and building OpenStep has no comparison row at all, because no other package on npm can.
 
 <p align="center">
   <img src="assets/performance.svg" alt="Benchmark chart comparing rork-plist with the plist, @expo/plist, bplist-parser, and bplist-creator packages. Bars show time relative to rork-plist as the geometric mean over three representative documents. Parsing XML, plist takes 5.8 times as long and @expo/plist 3.4 times. Building XML, plist takes 12.4 times as long and @expo/plist 4.8 times. Parsing OpenStep, plist takes 4.3 times as long. Parsing binary in aliasing mode, plist takes 1.3 times as long and bplist-parser 3.3 times. Building binary, plist takes 1.6 times as long and bplist-creator 3.8 times." width="880" />
@@ -181,6 +181,9 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 | parse OpenStep | auth response           | **4.4 µs**             | 24.1 µs (5.4×)  | —              | —                            |
 | parse OpenStep | device list             | **0.26 ms**            | 0.66 ms (2.5×)  | —              | —                            |
 | parse OpenStep | profile                 | **3.09 ms**            | 18.5 ms (6.0×)  | —              | —                            |
+| build OpenStep | auth response           | **3.9 µs**             | —               | —              | —                            |
+| build OpenStep | device list             | **0.40 ms**            | —               | —              | —                            |
+| build OpenStep | profile                 | **2.3 ms**             | —               | —              | —                            |
 | parse binary   | auth response (0.9 KiB) | **0.79 µs** (1.0 µs †) | 0.84 µs (1.1×)  | —              | 2.5 µs (3.2×)                |
 | parse binary   | device list (57 KiB)    | **0.20 ms**            | 0.34 ms (1.7×)  | —              | 0.88 ms (4.3×)               |
 | parse binary   | profile (493 KiB)       | **1.0 µs** (20.5 µs †) | 1.2 µs (1.2×)   | —              | 2.6 µs (2.5×)                |

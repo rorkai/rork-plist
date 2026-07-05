@@ -4,7 +4,15 @@ import { bench, describe } from "vitest";
 // because vitest's on-the-fly module transform keeps cross-module constants
 // as property reads that the bundled output inlines. `pnpm bench` builds
 // first.
-import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index";
+import {
+  buildBinaryPlist,
+  buildOpenStepPlist,
+  buildPlist,
+  parseBinaryPlist,
+  parseOpenStepPlist,
+  parsePlist,
+  type PlistValue,
+} from "../dist/index";
 
 /**
  * Representative document shapes.
@@ -59,16 +67,41 @@ const shapes = [
   { name: "profile", value: profile },
 ] as const;
 
+/**
+ * Rewrites a shape into the OpenStep value model, which is untyped — the
+ * numbers, booleans, and dates the other formats carry become strings.
+ */
+function stringifyLeaves(value: PlistValue): PlistValue {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(stringifyLeaves);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, stringifyLeaves(entry!)]));
+  }
+  return String(value);
+}
+
 for (const { name, value } of shapes) {
   const xml = buildPlist(value);
   const binary = buildBinaryPlist(value);
+  const openStepValue = stringifyLeaves(value);
+  const openStep = buildOpenStepPlist(openStepValue);
 
-  describe(`parse ${name} (xml ${(xml.length / 1024).toFixed(1)} KiB, binary ${(binary.length / 1024).toFixed(1)} KiB)`, () => {
+  describe(`parse ${name} (xml ${(xml.length / 1024).toFixed(1)} KiB, binary ${(binary.length / 1024).toFixed(1)} KiB, openstep ${(openStep.length / 1024).toFixed(1)} KiB)`, () => {
     bench("parsePlist (xml)", () => {
       parsePlist(xml);
     });
     bench("parseBinaryPlist", () => {
       parseBinaryPlist(binary);
+    });
+    bench("parseOpenStepPlist", () => {
+      parseOpenStepPlist(openStep);
     });
   });
 
@@ -78,6 +111,9 @@ for (const { name, value } of shapes) {
     });
     bench("buildBinaryPlist", () => {
       buildBinaryPlist(value);
+    });
+    bench("buildOpenStepPlist", () => {
+      buildOpenStepPlist(openStepValue);
     });
   });
 }
