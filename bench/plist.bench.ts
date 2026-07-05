@@ -4,7 +4,7 @@ import { bench, describe } from "vitest";
 // because vitest's on-the-fly module transform keeps cross-module constants
 // as property reads that the bundled output inlines. `pnpm bench` builds
 // first.
-import { buildPlist, parsePlist, type PlistValue } from "../dist/index";
+import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index";
 
 /**
  * Representative document shapes:
@@ -53,42 +53,31 @@ const profile: PlistValue = {
   Version: 1,
 };
 
-const authResponseXml = buildPlist(authResponse);
-const deviceListXml = buildPlist(deviceList);
-const profileXml = buildPlist(profile);
+const shapes = [
+  { name: "auth response", value: authResponse },
+  { name: "device list", value: deviceList },
+  { name: "profile", value: profile },
+] as const;
 
-describe(`parse auth response (${(authResponseXml.length / 1024).toFixed(1)} KiB)`, () => {
-  bench("parsePlist", () => {
-    parsePlist(authResponseXml);
-  });
-});
+for (const { name, value } of shapes) {
+  const xml = buildPlist(value);
+  const binary = buildBinaryPlist(value);
 
-describe(`parse device list (${(deviceListXml.length / 1024).toFixed(1)} KiB)`, () => {
-  bench("parsePlist", () => {
-    parsePlist(deviceListXml);
+  describe(`parse ${name} (xml ${(xml.length / 1024).toFixed(1)} KiB, binary ${(binary.length / 1024).toFixed(1)} KiB)`, () => {
+    bench("parsePlist (xml)", () => {
+      parsePlist(xml);
+    });
+    bench("parseBinaryPlist", () => {
+      parseBinaryPlist(binary);
+    });
   });
-});
 
-describe(`parse profile (${(profileXml.length / 1024).toFixed(1)} KiB)`, () => {
-  bench("parsePlist", () => {
-    parsePlist(profileXml);
+  describe(`build ${name}`, () => {
+    bench("buildPlist (xml)", () => {
+      buildPlist(value);
+    });
+    bench("buildBinaryPlist", () => {
+      buildBinaryPlist(value);
+    });
   });
-});
-
-describe("build auth response", () => {
-  bench("buildPlist", () => {
-    buildPlist(authResponse);
-  });
-});
-
-describe("build device list", () => {
-  bench("buildPlist", () => {
-    buildPlist(deviceList);
-  });
-});
-
-describe("build profile", () => {
-  bench("buildPlist", () => {
-    buildPlist(profile);
-  });
-});
+}
