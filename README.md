@@ -26,8 +26,6 @@ const xml = buildPlist({ device: "iPhone17,1", enabled: true });
 const fromBundle = parsePlist(await readFile("Info.plist")); // Uint8Array in, value out
 ```
 
-> The `await` above runs at the top level of an ESM module; inside CommonJS or a function, wrap it in an `async` function.
-
 ## Why
 
 Property lists are the wire format of Apple's ecosystem — authentication exchanges, provisioning profiles, device services, project metadata. Code that speaks those protocols increasingly runs everywhere at once: a web app in the browser, an API on an edge runtime, a desktop app's Node process, a CLI inside a sandbox.
