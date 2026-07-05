@@ -3,11 +3,13 @@
  *
  * Building runs in two phases. First the value tree is interned into a flat
  * object table: scalars are deduplicated by value (so a dictionary key reused
- * across many dicts is stored once), and each container is assigned an index
- * and recorded with the indices of its members. Then the table is encoded —
- * once the object count fixes the reference width and the serialized size
- * fixes the offset width — followed by the offset table and the fixed 32-byte
- * trailer. The root is always object 0.
+ * across many dicts is stored once; `<data>` payloads above
+ * {@link DATA_CONTENT_KEY_MAX_BYTES} deduplicate by view identity instead),
+ * and each container is assigned an index and recorded with the indices of
+ * its members. Then the table is encoded — once the object count fixes the
+ * reference width and the serialized size fixes the offset width — followed
+ * by the offset table and the fixed 32-byte trailer. The root is always
+ * object 0.
  *
  * The value model matches {@link "./build".buildPlist} exactly: `undefined`
  * dictionary values are omitted, and `null`, non-finite numbers, out-of-range
@@ -39,12 +41,29 @@ const TRAILER_SIZE = 32;
 const PLIST_DATE_EPOCH_OFFSET_SECONDS = 978_307_200;
 
 /**
+ * Largest `<data>` payload deduplicated by content rather than by identity.
+ *
+ * Content keying costs a full pass over the payload on every occurrence, so
+ * it must stay proportional to the small repeated tokens it exists for —
+ * session keys, hashes, certificates. Above this size the pass would dominate
+ * the whole build (measured: keying a 500 KB payload was ~40% of build time)
+ * to catch a duplicate that essentially never occurs by value at that size.
+ * Large payloads still deduplicate when the caller reuses one view object.
+ */
+const DATA_CONTENT_KEY_MAX_BYTES = 4096;
+
+/**
  * A resolved entry in the object table. Scalars are encoded eagerly during
  * interning; containers hold their members' indices and are encoded in the
  * second phase, once the reference width is known.
+ *
+ * Encoded bytes are kept as a list of pieces written back to back, so a
+ * `<data>` payload stays a borrowed view of the caller's bytes until the
+ * single copy into the output buffer — there is no intermediate
+ * header-plus-payload allocation.
  */
 type ObjectNode =
-  | { kind: "scalar"; bytes: Uint8Array }
+  | { kind: "scalar"; pieces: Uint8Array[] }
   | { kind: "array"; items: number[] }
   | { kind: "dict"; keys: number[]; values: number[] };
 
@@ -92,8 +111,28 @@ class BinaryBuilder {
   /** Object table in index order; the root is always index 0. */
   private readonly nodes: ObjectNode[] = [];
 
-  /** Maps a scalar's canonical key to its object index, for deduplication. */
-  private readonly scalarIndex = new Map<string, number>();
+  /**
+   * Interned scalar indices, one map per scalar kind. Separate maps keyed by
+   * primitive values replace a single string-keyed map because building a
+   * canonical key string per scalar (`i:42`, `d:1751624430000`) allocated on
+   * every occurrence — including cache hits — and dominated dictionary-heavy
+   * builds. Integers key by bigint (`number` inputs normalize first), so the
+   * `42` and `42n` spellings still intern to one object.
+   */
+  private readonly stringIndex = new Map<string, number>();
+  private readonly integerIndex = new Map<bigint, number>();
+  private readonly realIndex = new Map<number, number>();
+  private readonly dateIndex = new Map<number, number>();
+
+  /** Interned `<data>` indices by base64 content, for payloads small enough to key. */
+  private readonly dataContentIndex = new Map<string, number>();
+
+  /** Interned `<data>` indices by view identity, for payloads above the content-key cap. */
+  private readonly dataViewIndex = new Map<ArrayBufferView, number>();
+
+  /** Object index of each boolean singleton, or -1 until first interned. */
+  private trueIndex = -1;
+  private falseIndex = -1;
 
   /** Containers currently on the interning path, for cycle detection. */
   private readonly onPath = new WeakSet<object>();
@@ -112,9 +151,11 @@ class BinaryBuilder {
     // Object offsets are absolute, starting after the 8-byte magic.
     const offsets: number[] = [];
     let cursor = MAGIC.length;
-    for (const bytes of encoded) {
+    for (const pieces of encoded) {
       offsets.push(cursor);
-      cursor += bytes.length;
+      for (const piece of pieces) {
+        cursor += piece.length;
+      }
     }
     const offsetTableOffset = cursor;
     const offsetIntSize = byteWidth(offsetTableOffset);
@@ -122,8 +163,12 @@ class BinaryBuilder {
 
     const out = new Uint8Array(totalSize);
     out.set(MAGIC, 0);
-    for (let i = 0; i < encoded.length; i++) {
-      out.set(encoded[i]!, offsets[i]!);
+    let writeCursor = MAGIC.length;
+    for (const pieces of encoded) {
+      for (const piece of pieces) {
+        out.set(piece, writeCursor);
+        writeCursor += piece.length;
+      }
     }
     for (let i = 0; i < objectCount; i++) {
       writeUintBE(out, offsetTableOffset + i * offsetIntSize, offsets[i]!, offsetIntSize);
@@ -158,13 +203,13 @@ class BinaryBuilder {
     }
     switch (typeof value) {
       case "string":
-        return this.internScalar(`s:${value}`, () => this.encodeString(value));
+        return this.internString(value);
       case "number":
         return this.internNumber(value, path);
       case "bigint":
-        return this.internScalar(`i:${value}`, () => this.encodeInteger(this.checkedBigInt(value, path)));
+        return this.internInteger(this.checkedBigInt(value, path));
       case "boolean":
-        return this.internScalar(value ? "true" : "false", () => new Uint8Array([value ? 0x09 : 0x08]));
+        return this.internBoolean(value);
       case "object":
         return this.internObject(value, path);
       default:
@@ -185,15 +230,19 @@ class BinaryBuilder {
    */
   private internNumber(value: number, path: string): number {
     if (Number.isInteger(value)) {
-      const normalized = value === 0 ? 0 : value;
-      return this.internScalar(`i:${normalized}`, () =>
-        this.encodeInteger(this.checkedBigInt(BigInt(normalized), path)),
-      );
+      // Negative zero normalizes to zero before the bigint conversion.
+      return this.internInteger(this.checkedBigInt(BigInt(value === 0 ? 0 : value), path));
     }
     if (!Number.isFinite(value)) {
       throw new PlistBuildError(`${value} cannot be written to a property list`, path);
     }
-    return this.internScalar(`r:${value}`, () => this.encodeReal(value));
+    const existing = this.realIndex.get(value);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = this.appendScalar([this.encodeReal(value)]);
+    this.realIndex.set(value, index);
+    return index;
   }
 
   /**
@@ -207,14 +256,17 @@ class BinaryBuilder {
       if (Number.isNaN(time)) {
         throw new PlistBuildError("invalid Date cannot be written to a property list", path);
       }
-      return this.internScalar(`d:${time}`, () => this.encodeDate(time));
+      const existing = this.dateIndex.get(time);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const index = this.appendScalar([this.encodeDate(time)]);
+      this.dateIndex.set(time, index);
+      return index;
     }
 
     if (ArrayBuffer.isView(value)) {
-      // Only the view's window is read, so subarray slices of a larger buffer
-      // serialize correctly; deduplicate identical payloads by their bytes.
-      const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-      return this.internScalar(`data:${encodeBase64(bytes)}`, () => this.encodeData(bytes));
+      return this.internData(value);
     }
 
     if (Array.isArray(value)) {
@@ -226,6 +278,74 @@ class BinaryBuilder {
       throw new PlistBuildError("class instances have no property list representation", path);
     }
     return this.internDict(value, path);
+  }
+
+  /**
+   * Interns a `<data>` payload. Only the view's window is read, so subarray
+   * slices of a larger buffer serialize correctly. Payloads up to
+   * {@link DATA_CONTENT_KEY_MAX_BYTES} deduplicate by content; larger ones by
+   * view identity, so passing the same view twice still stores it once. The
+   * encoded node borrows the view rather than copying — the bytes are copied
+   * exactly once, into the output buffer.
+   */
+  private internData(value: ArrayBufferView): number {
+    const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+
+    if (bytes.byteLength <= DATA_CONTENT_KEY_MAX_BYTES) {
+      const key = encodeBase64(bytes);
+      const existing = this.dataContentIndex.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const index = this.appendScalar([this.sizeHeader(0x40, bytes.length), bytes]);
+      this.dataContentIndex.set(key, index);
+      return index;
+    }
+
+    const existing = this.dataViewIndex.get(value);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = this.appendScalar([this.sizeHeader(0x40, bytes.length), bytes]);
+    this.dataViewIndex.set(value, index);
+    return index;
+  }
+
+  /** Interns a string, deduplicating by value. */
+  private internString(value: string): number {
+    const existing = this.stringIndex.get(value);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = this.appendScalar(this.encodeString(value));
+    this.stringIndex.set(value, index);
+    return index;
+  }
+
+  /** Interns a 64-bit-checked integer, deduplicating by value. */
+  private internInteger(value: bigint): number {
+    const existing = this.integerIndex.get(value);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = this.appendScalar([this.encodeInteger(value)]);
+    this.integerIndex.set(value, index);
+    return index;
+  }
+
+  /** Interns a boolean singleton (`false` is 0x08, `true` is 0x09). */
+  private internBoolean(value: boolean): number {
+    const existing = value ? this.trueIndex : this.falseIndex;
+    if (existing !== -1) {
+      return existing;
+    }
+    const index = this.appendScalar([new Uint8Array([value ? 0x09 : 0x08])]);
+    if (value) {
+      this.trueIndex = index;
+    } else {
+      this.falseIndex = index;
+    }
+    return index;
   }
 
   /**
@@ -285,18 +405,10 @@ class BinaryBuilder {
     return index;
   }
 
-  /**
-   * Returns the index of a scalar with the given canonical key, encoding and
-   * appending it on first sight and reusing it thereafter.
-   */
-  private internScalar(key: string, encode: () => Uint8Array): number {
-    const existing = this.scalarIndex.get(key);
-    if (existing !== undefined) {
-      return existing;
-    }
+  /** Appends an encoded scalar to the object table, returning its index. */
+  private appendScalar(pieces: Uint8Array[]): number {
     const index = this.nodes.length;
-    this.nodes.push({ kind: "scalar", bytes: encode() });
-    this.scalarIndex.set(key, index);
+    this.nodes.push({ kind: "scalar", pieces });
     return index;
   }
 
@@ -317,18 +429,18 @@ class BinaryBuilder {
   // ------------------------------------------------------------------------
 
   /** Encodes a resolved node; containers now know the reference width. */
-  private encodeNode(node: ObjectNode, refSize: number): Uint8Array {
+  private encodeNode(node: ObjectNode, refSize: number): Uint8Array[] {
     if (node.kind === "scalar") {
-      return node.bytes;
+      return node.pieces;
     }
     if (node.kind === "array") {
-      return concat(this.sizeHeader(0xa0, node.items.length), this.encodeRefs(node.items, refSize));
+      return [this.sizeHeader(0xa0, node.items.length), this.encodeRefs(node.items, refSize)];
     }
-    return concat(
+    return [
       this.sizeHeader(0xd0, node.keys.length),
       this.encodeRefs(node.keys, refSize),
       this.encodeRefs(node.values, refSize),
-    );
+    ];
   }
 
   /** Encodes a list of object references, each `refSize` big-endian bytes. */
@@ -349,7 +461,11 @@ class BinaryBuilder {
     if (count < 0x0f) {
       return new Uint8Array([marker | count]);
     }
-    return concat(new Uint8Array([marker | 0x0f]), this.encodeInteger(BigInt(count)));
+    const countBytes = this.encodeInteger(BigInt(count));
+    const out = new Uint8Array(1 + countBytes.length);
+    out[0] = marker | 0x0f;
+    out.set(countBytes, 1);
+    return out;
   }
 
   /**
@@ -396,17 +512,13 @@ class BinaryBuilder {
     return out;
   }
 
-  /** Encodes a `<data>` object: a size header followed by the raw bytes. */
-  private encodeData(bytes: Uint8Array): Uint8Array {
-    return concat(this.sizeHeader(0x40, bytes.length), bytes);
-  }
-
   /**
-   * Encodes a `<string>` object. An all-ASCII string uses the one-byte-per-
-   * character encoding; anything else uses UTF-16 with two big-endian bytes
-   * per code unit. The count is the number of code units either way.
+   * Encodes a `<string>` object as pieces. An all-ASCII string uses the
+   * one-byte-per-character encoding; anything else uses UTF-16 with two
+   * big-endian bytes per code unit. The count is the number of code units
+   * either way.
    */
-  private encodeString(value: string): Uint8Array {
+  private encodeString(value: string): Uint8Array[] {
     let ascii = true;
     for (let i = 0; i < value.length; i++) {
       if (value.charCodeAt(i) > 0x7f) {
@@ -420,7 +532,7 @@ class BinaryBuilder {
       for (let i = 0; i < value.length; i++) {
         body[i] = value.charCodeAt(i);
       }
-      return concat(this.sizeHeader(0x50, value.length), body);
+      return [this.sizeHeader(0x50, value.length), body];
     }
 
     const body = new Uint8Array(value.length * 2);
@@ -428,7 +540,7 @@ class BinaryBuilder {
     for (let i = 0; i < value.length; i++) {
       view.setUint16(i * 2, value.charCodeAt(i));
     }
-    return concat(this.sizeHeader(0x60, value.length), body);
+    return [this.sizeHeader(0x60, value.length), body];
   }
 }
 
@@ -437,18 +549,3 @@ type PlistArrayInput = readonly PlistValue[];
 
 /** A plain object of property list values as seen by the interner. */
 type PlistDictInput = Record<string, PlistValue | undefined>;
-
-/** Concatenates byte chunks into one buffer. */
-function concat(...chunks: Uint8Array[]): Uint8Array {
-  let length = 0;
-  for (const chunk of chunks) {
-    length += chunk.length;
-  }
-  const out = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
-}

@@ -110,6 +110,21 @@ test("deduplicates repeated scalars", () => {
   expect(binary.length).toBeLessThan(300);
 });
 
+test("deduplicates <data> payloads", () => {
+  // Distinct small views with identical bytes deduplicate by content...
+  const sharedView = new Uint8Array([1, 2, 3, 4]);
+  const byContent = buildBinaryPlist({ a: new Uint8Array([1, 2, 3, 4]), b: new Uint8Array([1, 2, 3, 4]) });
+  const byIdentity = buildBinaryPlist({ a: sharedView, b: sharedView });
+  expect(byContent.length).toBe(byIdentity.length);
+  expect(parseBinaryPlist(byContent)).toEqual({ a: sharedView, b: sharedView });
+
+  // ...while a large payload is keyed by view identity (content keying would
+  // rescan the payload on every occurrence), so reusing one view stores the
+  // bytes once.
+  const large = new Uint8Array(100_000).fill(7);
+  expect(buildBinaryPlist({ a: large, b: large }).length).toBeLessThan(120_000);
+});
+
 test("allows dates outside the four-digit year range that XML rejects", () => {
   // The binary layout stores a raw timestamp, so it has no calendar-text limit.
   const farFuture = new Date(0);

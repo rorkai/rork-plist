@@ -120,14 +120,18 @@ class BinaryParser {
    * Throughput: the format interns strings, so one `<dict>` key shared across
    * hundreds of dictionaries is a single object referenced hundreds of times;
    * caching decodes it once instead of once per reference. Every object is
-   * cached (not just containers) because that reuse is where the win is, and a
-   * per-object map hit is far cheaper than re-decoding a string.
+   * cached (not just containers) because that reuse is where the win is.
+   *
+   * A dense array indexed by object index rather than a map: index lookups on
+   * the hot path cost an array read, and the allocation is safely bounded
+   * because the trailer validation caps the object count by what fits in the
+   * buffer. Sized in {@link parse} once the trailer is validated. `undefined`
+   * is never a property list value, so it is a safe "not resolved" sentinel.
    *
    * A referenced object resolves to one shared instance, as the platform
-   * reader does. `undefined` is never a property list value, so it is a safe
-   * "not yet resolved" sentinel.
+   * reader does.
    */
-  private readonly resolved = new Map<number, PlistValue>();
+  private resolved: (PlistValue | undefined)[] = [];
 
   /**
    * @param bytes The binary document to read.
@@ -181,6 +185,10 @@ class BinaryParser {
       this.fail("binary property list root object index is out of range", trailer + 16);
     }
 
+    // Safe to size eagerly: the offset-table bound above caps objectCount by
+    // what physically fits in the buffer.
+    // oxlint-disable-next-line no-new-array -- a sparse length-N cache is the point; Array.from would eagerly fill
+    this.resolved = new Array<PlistValue | undefined>(this.objectCount);
     return this.parseObject(topObject, 0);
   }
 
@@ -202,7 +210,7 @@ class BinaryParser {
     // An object already resolved once is returned as its shared instance,
     // which both bounds work on documents that reuse objects and keeps the
     // graph's reference sharing.
-    const cached = this.resolved.get(index);
+    const cached = this.resolved[index];
     if (cached !== undefined) {
       return cached;
     }
@@ -211,7 +219,7 @@ class BinaryParser {
     }
 
     const value = this.resolveObject(index, depth);
-    this.resolved.set(index, value);
+    this.resolved[index] = value;
     return value;
   }
 
