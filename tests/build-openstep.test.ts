@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { describe, expect, test } from "vitest";
+
 import {
   buildOpenStepPlist,
   parseBinaryPlist,
