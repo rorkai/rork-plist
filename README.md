@@ -146,24 +146,32 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 
 ## Performance
 
-Run benchmarks with `pnpm bench`; it builds first and measures the published artifact.
+`rork-plist` is measured against the most-used plist packages on npm — [`plist`](https://www.npmjs.com/package/plist) (XML + binary), [`@expo/plist`](https://www.npmjs.com/package/@expo/plist) (XML), and [`bplist-parser`](https://www.npmjs.com/package/bplist-parser) / [`bplist-creator`](https://www.npmjs.com/package/bplist-creator) (binary) — on three representative documents, using fixtures canonicalized by Apple's own `plutil` so no parser reads its own writer's output. It is the fastest across every operation and format, with zero dependencies.
 
 <p align="center">
-  <img src="assets/performance.svg" alt="Benchmark table: in XML form, an auth response parses in 3.4 microseconds and builds in 1.1 microseconds, a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds, and a data-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds; in binary form, the auth response parses in 1.1 microseconds and builds in 2.1 microseconds, the device list parses in 0.20 milliseconds and builds in 0.50 milliseconds, and the profile parses in 20 microseconds and builds in 20 microseconds" width="880" />
+  <img src="assets/performance.svg" alt="Benchmark chart comparing rork-plist with the plist, @expo/plist, bplist-parser, and bplist-creator packages. Bars show time relative to rork-plist as the geometric mean over three representative documents. Parsing XML, plist takes 5.4 times as long and @expo/plist 3.1 times. Building XML, plist takes 12.4 times as long and @expo/plist 4.7 times. Parsing binary in aliasing mode, plist takes 1.3 times as long and bplist-parser 3.3 times. Building binary, plist takes 1.6 times as long and bplist-creator 3.8 times." width="880" />
 </p>
 
-| Document                        | Format | Size    | Parse   | Build   | Parse speed | Build speed |
-| ------------------------------- | ------ | ------- | ------- | ------- | ----------- | ----------- |
-| auth response                   | XML    | 1.5 KiB | 3.4 µs  | 1.1 µs  | ~430 MiB/s  | ~1.2 GiB/s  |
-| auth response                   | binary | 0.9 KiB | 1.1 µs  | 2.1 µs  | ~800 MiB/s  | ~420 MiB/s  |
-| device list (500 dated entries) | XML    | 179 KiB | 0.72 ms | 0.42 ms | ~240 MiB/s  | ~420 MiB/s  |
-| device list (500 dated entries) | binary | 55 KiB  | 0.20 ms | 0.50 ms | ~270 MiB/s  | ~110 MiB/s  |
-| profile (data-heavy)            | XML    | 658 KiB | 0.71 ms | 79 µs   | ~900 MiB/s  | ~7.9 GiB/s  |
-| profile (data-heavy)            | binary | 493 KiB | 20 µs   | 20 µs   | ~24 GiB/s   | ~24 GiB/s   |
+| Operation    | Document                | `rork-plist`           | `plist`         | `@expo/plist`  | `bplist-parser` / `-creator` |
+| ------------ | ----------------------- | ---------------------- | --------------- | -------------- | ---------------------------- |
+| parse XML    | auth response (1.6 KiB) | **4.2 µs**             | 28.1 µs (6.7×)  | 14.3 µs (3.4×) | —                            |
+| parse XML    | device list (179 KiB)   | **0.66 ms**            | 9.25 ms (13.9×) | 4.06 ms (6.1×) | —                            |
+| parse XML    | profile (677 KiB)       | **1.02 ms**            | 1.67 ms (1.7×)  | 1.43 ms (1.4×) | —                            |
+| build XML    | auth response           | **1.2 µs**             | 12.0 µs (10.4×) | 8.8 µs (7.7×)  | —                            |
+| build XML    | device list             | **0.40 ms**            | 2.83 ms (7.1×)  | 2.90 ms (7.3×) | —                            |
+| build XML    | profile                 | **83 µs**              | 2.17 ms (26.0×) | 158 µs (1.9×)  | —                            |
+| parse binary | auth response (0.9 KiB) | **0.78 µs** (1.0 µs †) | 0.85 µs (1.1×)  | —              | 2.5 µs (3.2×)                |
+| parse binary | device list (57 KiB)    | **0.20 ms**            | 0.34 ms (1.7×)  | —              | 0.87 ms (4.4×)               |
+| parse binary | profile (493 KiB)       | **1.0 µs** (19.6 µs †) | 1.3 µs (1.3×)   | —              | 2.6 µs (2.6×)                |
+| build binary | auth response           | **2.0 µs**             | 2.8 µs (1.4×)   | —              | 9.5 µs (4.7×)                |
+| build binary | device list             | **0.49 ms**            | 0.69 ms (1.4×)  | —              | 2.58 ms (5.2×)               |
+| build binary | profile                 | **23 µs**              | 44.6 µs (1.9×)  | —              | 49.9 µs (2.2×)               |
 
-Measured on an Apple M5 Max, Node.js 24, single thread. With `data: "view"`, the data-heavy profile parses in ~1 µs — the structural scan alone, no payload copies.
+Measured on an Apple M5 Max, Node.js 24, single thread, with `plist` 5.0.0, `@expo/plist` 0.8.0, `bplist-parser` 0.3.2, and `bplist-creator` 0.1.1. Multipliers are relative to `rork-plist` on the same row. Reproduce with `pnpm bench:compare`; `pnpm bench` runs the library's own suite.
 
-Binary reads beat XML reads because object lengths are explicit — nothing is scanned — and `<data>` payloads transfer as plain byte copies instead of base64 decoding, which is why the data-heavy profile parses at memory-copy speed. By default parsed values own their memory: payloads are copied out of the input buffer, never aliased into it, so mutating a parsed value can never corrupt the source document and holding a small payload never pins a large input buffer alive; `data: "view"` trades that guarantee away explicitly. Binary writes split by shape: dictionary-heavy documents pay for the format's object table — per-value interning that streaming XML text does not need — while data-heavy documents build far faster in binary because payload bytes are copied once instead of base64-encoded. The dispatch checks that route `parsePlist` between formats are branch-predicted noise; the XML numbers are identical with binary support in the tree.
+† The other binary parsers return `<data>` payloads as views aliasing the input buffer, so the like-for-like figure uses `data: "view"`, which does the same. The parenthesized figure is the default `data: "copy"` mode, where parsed values own their memory and the difference is the cost of copying the payload bytes out — a guarantee no other library in the table offers at any speed.
+
+Binary reads beat XML reads because object lengths are explicit — nothing is scanned — and `<data>` payloads transfer as plain byte copies (or views) instead of base64 decoding. Binary writes split by shape. Dictionary-heavy documents pay for the format's object table — per-value interning that streaming XML text does not need — while data-heavy documents build far faster in binary because payload bytes are copied once instead of base64-encoded.
 
 ### Key performance features
 
@@ -182,6 +190,7 @@ pnpm lint         # oxlint
 pnpm format       # oxfmt
 pnpm checks       # format check + lint + typecheck + test
 pnpm bench        # vitest bench
+pnpm bench:compare # cross-library comparison (see Performance)
 pnpm build        # tsdown → dist/
 ```
 
