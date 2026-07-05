@@ -182,6 +182,31 @@ function bytesContain(bytes: Uint8Array, marker: string): boolean {
   return false;
 }
 
+/**
+ * Classifies a file this library failed to parse, deciding by the format
+ * first and consulting plutil only where its verdict changes the outcome.
+ * Only the `mismatch` outcome is a finding; everything else is input outside
+ * the format's scope or corrupt by plutil's own account.
+ */
+async function classifyFailure(path: string, bytes: Uint8Array, isBinary: boolean): Promise<Outcome> {
+  if (isBinary) {
+    if (bytes[6] !== 0x30 || bytes[7] !== 0x30) {
+      return "unsupported-binary-version";
+    }
+    if (bytesContain(bytes, "$archiver")) {
+      return "keyed-archive";
+    }
+    return (await plutilAccepts(path)) ? "mismatch" : "invalid-per-plutil";
+  }
+  if (!(await plutilAccepts(path))) {
+    return "invalid-per-plutil";
+  }
+  // plutil accepts it and it is not XML we could read; OpenStep text plists
+  // have no leading '<' once whitespace is skipped.
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  return text.trimStart().startsWith("<") ? "mismatch" : "openstep";
+}
+
 const options = parseArgs(process.argv.slice(2));
 
 console.log(`collecting .plist files under ${options.roots.join(", ")} (max ${options.maxFiles})`);
@@ -215,30 +240,10 @@ for (const path of paths) {
     counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
     parsed.push({ bucket: bucketOf(bytes.length), bytes: bytes.length, ms, path, value });
   } catch (error) {
-    const message = error instanceof PlistParseError ? error.message : String(error);
-    let outcome: Outcome;
-    if (isBinary) {
-      if (bytes[6] === 0x30 && bytes[7] === 0x30) {
-        if (bytesContain(bytes, "$archiver")) {
-          outcome = "keyed-archive";
-        } else if (await plutilAccepts(path)) {
-          outcome = "mismatch";
-        } else {
-          outcome = "invalid-per-plutil";
-        }
-      } else {
-        outcome = "unsupported-binary-version";
-      }
-    } else if (await plutilAccepts(path)) {
-      // plutil accepts it and it is not XML we could read; OpenStep text
-      // plists have no leading '<' once whitespace is skipped.
-      const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-      outcome = text.trimStart().startsWith("<") ? "mismatch" : "openstep";
-    } else {
-      outcome = "invalid-per-plutil";
-    }
+    const outcome = await classifyFailure(path, bytes, isBinary);
     counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
     if (outcome === "mismatch") {
+      const message = error instanceof PlistParseError ? error.message : String(error);
       findings.push(`${path} — plutil accepts, we fail with ${message}`);
     }
   }
