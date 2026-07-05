@@ -2,7 +2,7 @@
  * rork-plist — zero-dependency Apple property list parser and builder.
  *
  * The library is a single ESM artifact with named exports and no
- * environment-conditional entry points: the same code path runs in
+ * environment-conditional entry points, so the same code path runs in
  * browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
  *
  * ```ts

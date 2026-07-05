@@ -97,9 +97,9 @@ test("round-trips randomized documents", () => {
 });
 
 test("deduplicates repeated scalars", () => {
-  // Ten dicts each with the same two keys and a shared string value: without
-  // interning the keys and value would be re-emitted every time. The dedup is
-  // observable as a much smaller document than the naive size, and it must
+  // Ten dicts each with the same two keys and a shared string value — without
+  // interning, the keys and value would be re-emitted every time. The dedup
+  // is observable as a much smaller document than the naive size, and it must
   // still round-trip.
   const value = Array.from({ length: 10 }, () => ({ sharedKey: "shared-value", other: "shared-value" }));
   const binary = buildBinaryPlist(value);
@@ -145,7 +145,7 @@ describe("value-model parity with the XML builder", () => {
     ["NaN", NaN, "$"],
     ["Infinity", Infinity, "$"],
     ["out-of-range bigint", 2n ** 64n, "$"],
-    // Integer-valued doubles beyond the 64-bit window: both builders must
+    // Integer-valued doubles beyond the 64-bit window — both builders must
     // reject rather than truncate (binary) or emit unparsable text (XML).
     ["out-of-range positive integral number", 1e40, "$"],
     ["out-of-range negative integral number", -1e19, "$"],
@@ -170,8 +170,8 @@ test("rejects circular references instead of recursing forever", () => {
   expect(() => buildBinaryPlist(cyclic)).toThrow(/circular reference/u);
 });
 
-// Cross-validation against the platform's own plist tooling: our output must be
-// something Apple's parser accepts and reads back to the same value.
+// Cross-validation against the platform's own plist tooling — our output must
+// be something Apple's parser accepts and reads back to the same value.
 describe.runIf(process.platform === "darwin")("plutil binary cross-validation", () => {
   test("plutil accepts our binary output and it round-trips through plutil's XML", async () => {
     const dir = await mkdtemp(join(tmpdir(), "rork-plist-buildbin-"));
@@ -182,9 +182,10 @@ describe.runIf(process.platform === "darwin")("plutil binary cross-validation", 
       // plutil accepting the buffer proves the layout is well-formed.
       await expect(execFileAsync("plutil", ["-lint", binPath])).resolves.toBeDefined();
 
-      // Convert our binary to XML with plutil, then parse that XML with our own
-      // parser: the value must survive the trip through Apple's tooling. (JSON
-      // conversion can't be used — it has no representation for data or date.)
+      // Convert our binary to XML with plutil, then parse that XML with our
+      // own parser, so the value must survive the trip through Apple's
+      // tooling. (JSON conversion can't be used — it has no representation
+      // for data or date.)
       const { stdout } = await execFileAsync("plutil", ["-convert", "xml1", "-o", "-", binPath]);
       expect(parsePlist(stdout)).toEqual(RICH_VALUE);
     } finally {

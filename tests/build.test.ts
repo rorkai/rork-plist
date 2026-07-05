@@ -57,7 +57,7 @@ test("emits the empty-element forms the reference parser accepts", () => {
     { indent: false },
   );
 
-  // <data></data> is load-bearing: the reference parser rejects <data/>.
+  // <data></data> is load-bearing because the reference parser rejects <data/>.
   expect(xml).toContain("<dict/>");
   expect(xml).toContain("<array/>");
   expect(xml).toContain("<string></string>");

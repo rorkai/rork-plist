@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
 
 /**
- * Wraps a single hand-written object as a complete binary plist: magic, the
+ * Wraps a single hand-written object as a complete binary plist — magic, the
  * object at byte 8, a one-entry offset table, and a trailer. Every width is 1
  * byte, which is valid for any object under 256 bytes and keeps the malformed
  * fixtures below readable.
@@ -29,7 +29,7 @@ const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
 function singleObjectBinaryPlist(object: readonly number[]): Uint8Array {
   const body = [...MAGIC, ...object];
   const offsetTableOffset = body.length;
-  body.push(MAGIC.length); // offset table: object 0 begins at byte 8
+  body.push(MAGIC.length); // the one offset-table entry — object 0 begins at byte 8
 
   const trailer = Array.from({ length: 32 }, () => 0);
   trailer[6] = 1; // offsetIntSize
@@ -41,16 +41,16 @@ function singleObjectBinaryPlist(object: readonly number[]): Uint8Array {
 }
 
 /**
- * Builds a binary plist whose root fans out through shared references: object
- * 0 is an integer leaf and object k is the array `[k-1, k-1]`, so the root
- * (object `depth`) forms a balanced binary tree of height `depth`. A parser
- * that re-resolves each reference visits the leaf `2^depth` times; one that
- * memoizes resolved objects visits `depth + 1` objects total.
+ * Builds a binary plist whose root fans out through shared references.
+ * Object 0 is an integer leaf and object k is the array `[k-1, k-1]`, so the
+ * root (object `depth`) forms a balanced binary tree of height `depth`. A
+ * parser that re-resolves each reference visits the leaf `2^depth` times;
+ * one that memoizes resolved objects visits `depth + 1` objects total.
  *
  * @param depth Number of array levels above the leaf; also the root's index.
  */
 function fanoutBinaryPlist(depth: number): Uint8Array {
-  const objects: number[][] = [[0x10, 0x00]]; // object 0: integer 0
+  const objects: number[][] = [[0x10, 0x00]]; // object 0 is the integer 0
   for (let k = 1; k <= depth; k++) {
     objects.push([0xa2, k - 1, k - 1]); // array with two refs to object k-1
   }
@@ -80,9 +80,9 @@ function fanoutBinaryPlist(depth: number): Uint8Array {
  * against the source it was generated from.
  */
 const FIXTURES = {
-  // Every value type: strings (ASCII + non-ASCII), int, negative int, a
-  // bigint above the safe range, real, both booleans, data, empty data,
-  // a nested dict/array, and empty containers.
+  // Covers every value type — strings (ASCII + non-ASCII), int, negative
+  // int, a bigint above the safe range, real, both booleans, data, empty
+  // data, a nested dict/array, and empty containers.
   comprehensive:
     "YnBsaXN0MDDdAQIDBAUGBwgJCgsMDQ4PEBESExQVGhwdHh9UYmxvYlVjb3VudFNuZWdTYmlnUm9uVXJhdGlvWmVtcHR5X2RpY3RWbmVzdGVkU29mZldjcmVhdGVkWWVtcHR5X2FyclplbXB0eV9kYXRhVG5hbWVDAQL+ECoT//////////kTACAAAAAAAAEJIz/gAAAAAAAA0NEWF1FhoxgZGhABU3R3bwgIM0HH/Ir3AAAAoEBkAFIA+AByAGsIIyguMjY5P0pRVV1ncnd7fYaPkJmanZ+jpamqq7S1tgAAAAAAAAEBAAAAAAAAACAAAAAAAAAAAAAAAAAAAAC/",
   // A 20-element array and a 40-character string, both long enough to force
@@ -209,10 +209,10 @@ describe("malformed binary input", () => {
       0x30,
       0x30, // "bplist00"
       0xa1,
-      0x00, // object 0: array, count 1, element ref -> object 0
-      0x08, // offset table: object 0 begins at byte 8
-      // trailer: 6 lead bytes, offsetIntSize=1, objectRefSize=1,
-      // numObjects=1, topObject=0, offsetTableOffset=10
+      0x00, // object 0 — an array of count 1 whose element ref points back to object 0
+      0x08, // the one offset-table entry — object 0 begins at byte 8
+      // The trailer holds 6 lead bytes, then offsetIntSize=1, objectRefSize=1,
+      // numObjects=1, topObject=0, offsetTableOffset=10.
       0x00,
       0x00,
       0x00,
@@ -270,8 +270,8 @@ describe("malformed binary input", () => {
   });
 
   test("rejects a non-ASCII byte inside an ASCII string object", () => {
-    // 0x51: ASCII string of length 1; 0x80 is outside the ASCII range and
-    // would only ever appear in a UTF-16 (0x6n) string object.
+    // 0x51 is an ASCII string of length 1; 0x80 is outside the ASCII range
+    // and would only ever appear in a UTF-16 (0x6n) string object.
     const nonAscii = singleObjectBinaryPlist([0x51, 0x80]);
     expect(() => parseBinaryPlist(nonAscii)).toThrow(/non-ASCII/u);
   });

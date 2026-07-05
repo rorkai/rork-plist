@@ -7,12 +7,12 @@ import { bench, describe } from "vitest";
 import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index";
 
 /**
- * Representative document shapes:
+ * Representative document shapes.
  *
- * - "auth response": a small dict with a few binary payloads, the shape of a
- *   typical authentication exchange.
- * - "device list": many small dicts, the shape of enumeration responses.
- * - "profile": a document dominated by large binary payloads.
+ * The "auth response" is a small dict with a few binary payloads, the shape
+ * of a typical authentication exchange. The "device list" is many small
+ * dicts, the shape of enumeration responses. The "profile" is a document
+ * dominated by large binary payloads.
  */
 
 function bytes(length: number, seed: number): Uint8Array {

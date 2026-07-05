@@ -34,7 +34,8 @@ export interface PlistErrorPosition {
  *
  * Runs only when an error is actually thrown, so parsing never pays for line
  * tracking on the happy path. A non-string source is binary input, which has
- * no lines: the byte offset is reported as `offset` with `line`/`column` at 1.
+ * no lines, so the byte offset is reported as `offset` with `line`/`column`
+ * at 1.
  */
 function positionAt(source: string | Uint8Array, offset: number): PlistErrorPosition {
   if (typeof source !== "string") {

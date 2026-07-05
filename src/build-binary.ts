@@ -2,9 +2,9 @@
  * Binary property list (`bplist00`) serialization.
  *
  * Building runs in two phases. First the value tree is interned into a flat
- * object table: scalars are deduplicated by value (so a dictionary key reused
- * across many dicts is stored once; `<data>` payloads above
- * {@link DATA_CONTENT_KEY_MAX_BYTES} deduplicate by view identity instead),
+ * object table, where scalars are deduplicated by value (a dictionary key
+ * reused across many dicts is stored once, and `<data>` payloads above
+ * {@link DATA_CONTENT_KEY_MAX_BYTES} deduplicate by view identity instead)
  * and each container is assigned an index and recorded with the indices of
  * its members. Then the table is encoded — once the object count fixes the
  * reference width and the serialized size fixes the offset width — followed
@@ -52,8 +52,8 @@ const PLIST_DATE_EPOCH_OFFSET_SECONDS = 978_307_200;
  * true duplicate pays a full-length compare. The cap keeps that worst case
  * proportional to the small repeated tokens content dedup exists for —
  * session keys, hashes, certificates. Above it, payloads deduplicate by view
- * identity only (measured before the cap: content-keying a 500 KB payload
- * was ~40% of the whole build).
+ * identity only — before the cap existed, content-keying a 500 KB payload
+ * measured at ~40% of the whole build.
  */
 const DATA_CONTENT_KEY_MAX_BYTES = 4096;
 
@@ -222,8 +222,9 @@ class BinaryBuilder {
       writeUintBE(out, offsetTableOffset + i * offsetIntSize, offsets[i]!, offsetIntSize);
     }
 
-    // Trailer: 5 unused + sort version, then the two widths and three 64-bit
-    // counts. The root object is index 0, so topObject stays 0.
+    // The trailer holds five unused bytes and the sort version, then the two
+    // widths and three 64-bit counts. The root object is index 0, so
+    // topObject stays 0.
     const trailer = totalSize - TRAILER_SIZE;
     out[trailer + 6] = offsetIntSize;
     out[trailer + 7] = objectRefSize;
@@ -299,8 +300,8 @@ class BinaryBuilder {
   }
 
   /**
-   * Interns object-typed values: dates and binary data (deduplicated by value)
-   * and arrays and dictionaries (interned structurally). Anything else
+   * Interns object-typed values. Dates and binary data deduplicate by value,
+   * arrays and dictionaries intern structurally, and anything else
    * object-shaped — class instances, `Map`, `Set` — is rejected.
    */
   private internObject(value: object & PlistValue, path: string): number {
@@ -425,8 +426,9 @@ class BinaryBuilder {
   }
 
   /**
-   * Interns an array: reserves its index, interns each element, then records
-   * the element indices. The reserved-index-first order keeps the root at 0.
+   * Interns an array by reserving its index, interning each element, then
+   * recording the element indices. The reserved-index-first order keeps the
+   * root at 0.
    */
   private internArray(value: PlistArrayInput, path: string): number {
     this.enterContainer(value, path);
@@ -441,7 +443,7 @@ class BinaryBuilder {
   }
 
   /**
-   * Interns a dictionary: keys and values become separate objects, and a key
+   * Interns a dictionary. Keys and values become separate objects, and a key
    * whose value is `undefined` is omitted (matching `JSON.stringify` and the
    * XML builder). Keys intern as strings, so repeated keys deduplicate.
    */

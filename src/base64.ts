@@ -3,7 +3,7 @@
  *
  * The codec is exported as part of the public API because protocol code that
  * works with property lists almost always needs a base64 codec with the same
- * tolerance rules: whitespace anywhere (Apple tools wrap `<data>` content
+ * tolerance rules — whitespace anywhere (Apple tools wrap `<data>` content
  * across indented lines) and optional padding, but nothing else.
  *
  * Hosts that expose a native codec through the `Buffer` global (Node.js,
@@ -135,7 +135,7 @@ export function decodeBase64(text: string): Uint8Array {
 
   const symbolCount = stripped.length - padCount;
   const remainder = symbolCount % 4;
-  // A single trailing symbol carries six bits: not enough for a byte, so the
+  // A single trailing symbol carries six bits, not enough for a byte, so the
   // group is truncated rather than merely unpadded.
   if (remainder === 1) {
     throw new RangeError("base64 input is truncated");

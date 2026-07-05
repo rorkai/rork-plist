@@ -3,18 +3,19 @@
  *
  * The binary format is an object table with an offset index and a fixed
  * 32-byte trailer, all big-endian (which is `DataView`'s default byte order).
- * A document is: the 8-byte magic `bplist00`, the encoded objects, an offset
- * table mapping each object index to its byte offset, and the trailer naming
- * the integer widths, object count, root object index, and offset-table
- * location. Containers reference their members by index into the offset
- * table, so the parser resolves objects on demand starting from the root.
+ * A document starts with the 8-byte magic `bplist00`, followed by the encoded
+ * objects, an offset table mapping each object index to its byte offset, and
+ * the trailer naming the integer widths, object count, root object index, and
+ * offset-table location. Containers reference their members by index into the
+ * offset table, so the parser resolves objects on demand starting from the
+ * root.
  *
  * Every read is bounds-checked against the buffer, and object-reference
  * cycles are bounded by {@link ParsePlistOptions.maxDepth}, so malformed or
  * adversarial input raises {@link PlistParseError} rather than reading out of
- * bounds or recursing forever. The layout is verified empirically: the test
- * suite cross-checks this parser against binary documents produced by the
- * platform plist tooling.
+ * bounds or recursing forever. The layout is verified empirically by
+ * cross-checking this parser against binary documents produced by the
+ * platform plist tooling in the test suite.
  *
  * @module
  */
@@ -116,24 +117,26 @@ class BinaryParser {
   private lengthStart = 0;
 
   /**
-   * Caches each object's resolved value by index. The object table is a graph:
-   * one object can be referenced from many places, so resolving each index at
-   * most once is both a correctness guard and the main throughput win.
+   * Caches each object's resolved value by index, so every index resolves at
+   * most once. The object table is a graph and one object can be referenced
+   * from many places, which makes the cache both a correctness guard and the
+   * main throughput win.
    *
-   * Correctness: without it, a table like `A[n] = [A[n-1], A[n-1]]` re-resolves
-   * `A[n-1]` twice at every level, expanding a tiny buffer to `2^n` allocations
-   * while staying under {@link maxDepth}.
+   * It guards correctness because without it a table like
+   * `A[n] = [A[n-1], A[n-1]]` re-resolves `A[n-1]` twice at every level,
+   * expanding a tiny buffer to `2^n` allocations while staying under
+   * {@link maxDepth}. It wins throughput because the format interns strings,
+   * so one `<dict>` key shared across hundreds of dictionaries is a single
+   * object referenced hundreds of times, and caching decodes it once instead
+   * of once per reference. Every object is cached, not just containers,
+   * because that reuse is where the win is.
    *
-   * Throughput: the format interns strings, so one `<dict>` key shared across
-   * hundreds of dictionaries is a single object referenced hundreds of times;
-   * caching decodes it once instead of once per reference. Every object is
-   * cached (not just containers) because that reuse is where the win is.
-   *
-   * A dense array indexed by object index rather than a map: index lookups on
-   * the hot path cost an array read, and the allocation is safely bounded
-   * because the trailer validation caps the object count by what fits in the
-   * buffer. Sized in {@link parse} once the trailer is validated. `undefined`
-   * is never a property list value, so it is a safe "not resolved" sentinel.
+   * The cache is a dense array indexed by object index rather than a map, so
+   * a lookup on the hot path costs one array read. The eager allocation is
+   * safely bounded because the trailer validation caps the object count by
+   * what fits in the buffer; {@link parse} sizes it once the trailer is
+   * validated. `undefined` is never a property list value, which makes it a
+   * safe "not resolved" sentinel.
    *
    * A referenced object resolves to one shared instance, as the platform
    * reader does.
@@ -197,8 +200,8 @@ class BinaryParser {
       this.fail("binary property list root object index is out of range", trailer + 16);
     }
 
-    // Safe to size eagerly: the offset-table bound above caps objectCount by
-    // what physically fits in the buffer.
+    // Sizing eagerly is safe because the offset-table bound above caps
+    // objectCount by what physically fits in the buffer.
     // oxlint-disable-next-line no-new-array -- a sparse length-N cache is the point; Array.from would eagerly fill
     this.resolved = new Array<PlistValue | undefined>(this.objectCount);
     return this.parseObject(topObject, 0);
@@ -323,8 +326,8 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a `real` object: a big-endian IEEE 754 float (4 bytes) or double
-   * (8 bytes).
+   * Resolves a `real` object, stored as a big-endian IEEE 754 float (4 bytes)
+   * or double (8 bytes).
    */
   private parseReal(offset: number, byteCount: number): number {
     this.requireBytes(offset + 1, byteCount);
@@ -338,10 +341,10 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a `date` object: a big-endian double of seconds since the
-   * property list date epoch (2001-01-01), shifted onto Unix time for the
-   * `Date`. The result is rounded to the nearest millisecond — a `Date` holds
-   * integer milliseconds, so this recovers the intended value from the
+   * Resolves a `date` object, stored as a big-endian double of seconds since
+   * the property list date epoch (2001-01-01) and shifted onto Unix time for
+   * the `Date`. The result is rounded to the nearest millisecond — a `Date`
+   * holds integer milliseconds, so this recovers the intended value from the
    * floating-point seconds representation rather than leaving a 1-ulp error.
    *
    * The date marker is always `0x33` (an 8-byte payload); the low nibble is
@@ -365,9 +368,10 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a `data` object: by default a standalone `Uint8Array` copied out
-   * of the input window, or a borrowed `subarray` view when the caller opted
-   * into {@link ParsePlistOptions.data | data: "view"}.
+   * Resolves a `data` object. By default the payload is a standalone
+   * `Uint8Array` copied out of the input window; it becomes a borrowed
+   * `subarray` view when the caller opted into
+   * {@link ParsePlistOptions.data | data: "view"}.
    */
   private parseData(offset: number, objectInfo: number): Uint8Array {
     this.readLength(offset, objectInfo);
@@ -381,10 +385,10 @@ class BinaryParser {
   }
 
   /**
-   * Resolves an ASCII `string` object: one byte per character, each a code
-   * point in 0–127. A byte above `0x7f` is out of spec — the writer encodes
-   * such strings as UTF-16 (the `0x6n` marker) — so it fails rather than being
-   * silently reinterpreted as a Latin-1 character.
+   * Resolves an ASCII `string` object, stored one byte per character with
+   * every code point in 0–127. A byte above `0x7f` is out of spec — the
+   * writer encodes such strings as UTF-16 (the `0x6n` marker) — so it fails
+   * rather than being silently reinterpreted as a Latin-1 character.
    */
   private parseAsciiString(offset: number, objectInfo: number): string {
     this.readLength(offset, objectInfo);
@@ -406,8 +410,8 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a Unicode `string` object: `count` UTF-16 code units, each stored
-   * as two big-endian bytes. JS strings are UTF-16, so the units pass straight
+   * Resolves a Unicode `string` object, stored as UTF-16 code units of two
+   * big-endian bytes each. JS strings are UTF-16, so the units pass straight
    * through.
    */
   private parseUnicodeString(offset: number, objectInfo: number): string {
@@ -424,8 +428,8 @@ class BinaryParser {
   }
 
   /**
-   * Resolves an `array` (or set) object: a count followed by that many object
-   * references, each resolved in turn.
+   * Resolves an `array` (or set) object, stored as a count followed by that
+   * many object references, each resolved in turn.
    */
   private parseArray(offset: number, objectInfo: number, depth: number): PlistArray {
     this.readLength(offset, objectInfo);
@@ -440,9 +444,10 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a `dict` object: a count, then all key references, then all value
-   * references. Keys must resolve to strings, and a literal `__proto__` key is
-   * stored as an own property so untrusted documents cannot pollute prototypes.
+   * Resolves a `dict` object, stored as a count, then all key references,
+   * then all value references. Keys must resolve to strings, and a literal
+   * `__proto__` key is stored as an own property so untrusted documents
+   * cannot pollute prototypes.
    */
   private parseDict(offset: number, objectInfo: number, depth: number): PlistDictionary {
     this.readLength(offset, objectInfo);
@@ -502,22 +507,14 @@ class BinaryParser {
 
   /**
    * Reads one object reference and validates it against the object count.
-   * The read itself skips {@link requireBytes}: both containers span-check
-   * all their references in one call before looping. One- and two-byte
-   * widths — which cover practically every document — read directly, without
-   * the general width switch.
+   * The read itself skips {@link requireBytes} because both containers
+   * span-check all their references in one call before looping.
    *
    * @param offset Byte offset of the reference within a container.
    * @returns The referenced object's index into the offset table.
    */
   private readRef(offset: number): number {
-    const size = this.objectRefSize;
-    const index =
-      size === 1
-        ? this.bytes[offset]!
-        : size === 2
-          ? this.view.getUint16(offset)
-          : this.readUintUnchecked(offset, size);
+    const index = this.readTableEntry(offset, this.objectRefSize);
     if (index >= this.objectCount) {
       this.fail("binary object reference is out of range", offset);
     }
@@ -527,21 +524,32 @@ class BinaryParser {
   /**
    * Returns the byte offset of object `index` from the offset table, validated
    * to point into the object region (after the magic, before the table).
-   * The read skips {@link requireBytes}: {@link parse} validated the whole
-   * table span (`offsetTableOffset + objectCount * offsetIntSize`) up front,
-   * and every `index` is validated against `objectCount` before arriving here.
-   * One- and two-byte widths — which cover practically every document — read
-   * directly, without the general width switch.
+   * The read skips {@link requireBytes} because {@link parse} validated the
+   * whole table span up front and every `index` is validated against
+   * `objectCount` before arriving here.
    */
   private objectOffset(index: number): number {
-    const size = this.offsetIntSize;
-    const entry = this.offsetTableOffset + index * size;
-    const offset =
-      size === 1 ? this.bytes[entry]! : size === 2 ? this.view.getUint16(entry) : this.readUintUnchecked(entry, size);
+    const entry = this.offsetTableOffset + index * this.offsetIntSize;
+    const offset = this.readTableEntry(entry, this.offsetIntSize);
     if (offset < MAGIC.length || offset >= this.offsetTableOffset) {
       this.fail("binary object offset is out of bounds", entry);
     }
     return offset;
+  }
+
+  /**
+   * Reads one offset-table entry or object reference whose span was already
+   * validated. One- and two-byte widths cover practically every document, so
+   * they read directly before falling back to the general width switch.
+   */
+  private readTableEntry(offset: number, size: number): number {
+    if (size === 1) {
+      return this.bytes[offset]!;
+    }
+    if (size === 2) {
+      return this.view.getUint16(offset);
+    }
+    return this.readUintUnchecked(offset, size);
   }
 
   /**

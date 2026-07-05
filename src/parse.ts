@@ -1,23 +1,23 @@
 /**
  * Property list parsing entry point and the XML parser.
  *
- * {@link parsePlist} is the public entry: it takes an XML string, or a buffer
+ * {@link parsePlist} is the public entry. It takes an XML string, or a buffer
  * that it routes to the binary parser (see {@link "./parse-binary"}) or
  * decodes as UTF-8 XML. The XML parser itself is a hand-written
  * recursive-descent scanner over the property list grammar rather than a
  * general XML parser. The plist DTD is a closed vocabulary of ten elements
  * with no meaningful attributes, so a dedicated scanner is both faster and
- * safer: DOCTYPE internal subsets are skipped without processing, and external
- * entities simply do not exist here, which rules out entity-expansion and
- * external-entity attacks by construction.
+ * safer — DOCTYPE internal subsets are skipped without processing, and
+ * external entities simply do not exist here, which rules out
+ * entity-expansion and external-entity attacks by construction.
  *
- * Grammar decisions mirror the reference implementation's observed behavior
- * (verified against the platform plist tooling; see the test suite):
+ * Grammar decisions mirror the reference implementation's observed behavior,
+ * verified against the platform plist tooling in the test suite. That covers
  * hexadecimal integers, `nan`/`inf` reals, second-precision UTC dates,
  * duplicate dictionary keys resolving to the last occurrence, `<key>`
  * outside a dictionary parsing as a string, attributes being ignored, and
  * content after the closing `</plist>` tag being ignored. The one deliberate
- * strictness deviation is documented on {@link parsePlist}: corrupt base64
+ * strictness deviation is documented on {@link parsePlist} — corrupt base64
  * in `<data>` raises an error instead of silently decoding to fewer bytes.
  *
  * @module
@@ -208,11 +208,12 @@ interface OpenTag {
  * {@link PlistValue} for how each element maps to a JavaScript value, and
  * {@link parseBinaryPlist} for the binary specifics.
  *
- * One deliberate strictness deviation for XML: corrupt base64 inside `<data>`
- * raises {@link PlistParseError}, where the reference implementation silently
- * decodes to fewer bytes. Silent truncation is indistinguishable from a valid
- * shorter payload, which is unacceptable for the certificates, proofs, and
- * tokens `<data>` elements typically carry.
+ * XML parsing deviates from the reference implementation in one deliberate
+ * way — corrupt base64 inside `<data>` raises {@link PlistParseError}, where
+ * the reference implementation silently decodes to fewer bytes. Silent
+ * truncation is indistinguishable from a valid shorter payload, which is
+ * unacceptable for the certificates, proofs, and tokens `<data>` elements
+ * typically carry.
  *
  * @param input Source of the document — XML text, or a buffer holding either
  *   binary or XML bytes.
@@ -250,8 +251,8 @@ function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
  *
  * The instance tracks one piece of state — the current offset `pos` — and
  * moves strictly forward through the input. Methods are grouped in three
- * layers: document/value grammar, the markup tokenizer, and text content
- * decoding.
+ * layers, from the document/value grammar down through the markup tokenizer
+ * to text content decoding.
  */
 class Parser {
   /** Current offset into {@link src}; only ever moves forward. */
@@ -267,7 +268,7 @@ class Parser {
   ) {}
 
   /**
-   * Parses the whole document: optional prolog, optional `<plist>` wrapper,
+   * Parses the whole document — optional prolog, optional `<plist>` wrapper,
    * exactly one root value.
    */
   parseDocument(): PlistValue {
@@ -369,7 +370,7 @@ class Parser {
   }
 
   /**
-   * Parses `<array>` content: a sequence of value elements.
+   * Parses `<array>` content — a sequence of value elements.
    */
   private parseArray(depth: number, selfClosed: boolean): PlistArray {
     this.checkDepth(depth);
@@ -431,7 +432,7 @@ class Parser {
   }
 
   /**
-   * Parses `<real>` content: decimal notation plus the reference parser's
+   * Parses `<real>` content — decimal notation plus the reference parser's
    * `nan`/`inf`/`infinity` spellings.
    */
   private parseReal(tag: OpenTag): number {
@@ -510,7 +511,7 @@ class Parser {
   // ------------------------------------------------------------------------
 
   /**
-   * Skips everything that may legally appear between elements: whitespace,
+   * Skips everything that may legally appear between elements — whitespace,
    * comments, processing instructions (including the XML declaration), and
    * a DOCTYPE. Stops at the next `<` of an element tag, at CDATA (which is
    * content, reported by the caller), or at any other content.
@@ -714,7 +715,7 @@ class Parser {
     switch (src.charCodeAt(pos)) {
       case 0x61: // a
         return this.matchKnownName("array");
-      case 0x64: // d: dict, or date/data (they differ at the fourth character)
+      case 0x64: // d begins dict, date, and data (they differ at the fourth character)
         if (src.charCodeAt(pos + 1) === 0x69) {
           return this.matchKnownName("dict");
         }
@@ -874,8 +875,8 @@ class Parser {
    * Resolves one reference body (the text between `&` and `;`).
    *
    * Supports the five XML predefined entities and decimal or hexadecimal
-   * character references. There is nothing else to support: plist documents
-   * cannot define entities because the DOCTYPE is never processed.
+   * character references. There is nothing else to support, because plist
+   * documents cannot define entities when the DOCTYPE is never processed.
    */
   private resolveReference(body: string, offset: number): string {
     switch (body) {
