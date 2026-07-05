@@ -130,6 +130,10 @@ describe("value-model parity with the XML builder", () => {
     ["NaN", NaN, "$"],
     ["Infinity", Infinity, "$"],
     ["out-of-range bigint", 2n ** 64n, "$"],
+    // Integer-valued doubles beyond the 64-bit window: both builders must
+    // reject rather than truncate (binary) or emit unparsable text (XML).
+    ["out-of-range positive integral number", 1e40, "$"],
+    ["out-of-range negative integral number", -1e19, "$"],
     ["a class instance", new Map(), "$"],
   ])("both builders reject %s", (_label, value, path) => {
     expect(() => buildPlist(value as never)).toThrow(path);

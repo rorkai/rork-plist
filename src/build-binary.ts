@@ -176,11 +176,19 @@ class BinaryBuilder {
    * Interns a `number`: an integral value becomes an `<integer>` object (with
    * `-0` normalized to `0`), a finite fraction becomes a `<real>`, and `NaN`
    * or an infinity is rejected — mirroring the XML builder.
+   *
+   * Integral numbers pass through the same 64-bit range check as bigints
+   * because `encodeInteger` cannot represent values outside `[-(2^63), 2^64)`:
+   * a too-negative value would wrap in the signed 8-byte branch, and a value
+   * above `2^128` would silently truncate in the 16-byte branch. Both are
+   * data corruption, so an out-of-range integer must fail loudly instead.
    */
   private internNumber(value: number, path: string): number {
     if (Number.isInteger(value)) {
       const normalized = value === 0 ? 0 : value;
-      return this.internScalar(`i:${normalized}`, () => this.encodeInteger(BigInt(normalized)));
+      return this.internScalar(`i:${normalized}`, () =>
+        this.encodeInteger(this.checkedBigInt(BigInt(normalized), path)),
+      );
     }
     if (!Number.isFinite(value)) {
       throw new PlistBuildError(`${value} cannot be written to a property list`, path);
@@ -292,9 +300,14 @@ class BinaryBuilder {
     return index;
   }
 
+  /**
+   * Returns `value` if it fits the `<integer>` element's 64-bit window,
+   * throwing {@link PlistBuildError} otherwise. Guards both the `bigint` and
+   * the integral-`number` paths so no out-of-range value reaches the encoder.
+   */
   private checkedBigInt(value: bigint, path: string): bigint {
     if (value < PLIST_INTEGER_MIN || value > PLIST_INTEGER_MAX) {
-      throw new PlistBuildError(`bigint ${value} overflows the 64-bit <integer> range`, path);
+      throw new PlistBuildError(`integer ${value} overflows the 64-bit <integer> range`, path);
     }
     return value;
   }

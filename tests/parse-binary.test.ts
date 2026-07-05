@@ -4,9 +4,74 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { buildPlist, decodeBase64, parseBinaryPlist, parsePlist, PlistParseError, type PlistValue } from "../src/index";
+import {
+  buildPlist,
+  decodeBase64,
+  parseBinaryPlist,
+  parsePlist,
+  PlistParseError,
+  type PlistArray,
+  type PlistValue,
+} from "../src/index";
 
 const execFileAsync = promisify(execFile);
+
+const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
+
+/**
+ * Wraps a single hand-written object as a complete binary plist: magic, the
+ * object at byte 8, a one-entry offset table, and a trailer. Every width is 1
+ * byte, which is valid for any object under 256 bytes and keeps the malformed
+ * fixtures below readable.
+ *
+ * @param object The object's raw bytes (marker plus payload).
+ */
+function singleObjectBinaryPlist(object: readonly number[]): Uint8Array {
+  const body = [...MAGIC, ...object];
+  const offsetTableOffset = body.length;
+  body.push(MAGIC.length); // offset table: object 0 begins at byte 8
+
+  const trailer = Array.from({ length: 32 }, () => 0);
+  trailer[6] = 1; // offsetIntSize
+  trailer[7] = 1; // objectRefSize
+  trailer[15] = 1; // objectCount = 1
+  // topObject stays 0; offsetTableOffset in the last trailer byte.
+  trailer[31] = offsetTableOffset;
+  return Uint8Array.from([...body, ...trailer]);
+}
+
+/**
+ * Builds a binary plist whose root fans out through shared references: object
+ * 0 is an integer leaf and object k is the array `[k-1, k-1]`, so the root
+ * (object `depth`) forms a balanced binary tree of height `depth`. A parser
+ * that re-resolves each reference visits the leaf `2^depth` times; one that
+ * memoizes resolved objects visits `depth + 1` objects total.
+ *
+ * @param depth Number of array levels above the leaf; also the root's index.
+ */
+function fanoutBinaryPlist(depth: number): Uint8Array {
+  const objects: number[][] = [[0x10, 0x00]]; // object 0: integer 0
+  for (let k = 1; k <= depth; k++) {
+    objects.push([0xa2, k - 1, k - 1]); // array with two refs to object k-1
+  }
+
+  const body: number[] = [...MAGIC];
+  const offsets: number[] = [];
+  for (const object of objects) {
+    offsets.push(body.length);
+    body.push(...object);
+  }
+  const offsetTableOffset = body.length;
+  body.push(...offsets); // 1-byte offsets, valid while the body stays < 256 B
+
+  const trailer = Array.from({ length: 32 }, () => 0);
+  trailer[6] = 1; // offsetIntSize
+  trailer[7] = 1; // objectRefSize
+  trailer[15] = objects.length; // objectCount (< 256)
+  trailer[23] = depth; // topObject = root index
+  trailer[31] = offsetTableOffset; // offset table location (< 256)
+  return Uint8Array.from([...body, ...trailer]);
+}
 
 /**
  * Binary property lists produced by the platform `plutil` tool, captured as
@@ -78,6 +143,31 @@ describe("parsePlist auto-detection", () => {
   test("still parses an XML string", () => {
     expect(parsePlist(buildPlist({ ok: true }))).toEqual({ ok: true });
   });
+
+  test("rejects invalid UTF-8 on the XML byte path", () => {
+    // Leads with '<' so the bplist magic check fails and the buffer takes the
+    // XML-decode path; 0xff is never a valid UTF-8 byte.
+    expect(() => parsePlist(new Uint8Array([0x3c, 0xff]))).toThrow(PlistParseError);
+  });
+});
+
+describe("shared object references", () => {
+  test("resolves repeated references to one shared value without expanding", () => {
+    // Height 60 is 2^60 leaf visits without memoization — the test would not
+    // finish. It returns immediately when references are resolved once, so the
+    // assertion walks the shared spine rather than deep-equaling the tree.
+    const depth = 60;
+    let node: PlistValue = parseBinaryPlist(fanoutBinaryPlist(depth));
+
+    for (let level = 0; level < depth; level++) {
+      expect(Array.isArray(node)).toBe(true);
+      const array = node as PlistArray;
+      expect(array).toHaveLength(2);
+      expect(array[0]).toBe(array[1]); // the same instance, not a re-parsed copy
+      node = array[0]!;
+    }
+    expect(node).toBe(0);
+  });
 });
 
 describe("malformed binary input", () => {
@@ -139,6 +229,26 @@ describe("malformed binary input", () => {
     expect(() => parseBinaryPlist(new Uint8Array([0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30]))).toThrow(
       PlistParseError,
     );
+  });
+
+  test("rejects a date marker other than 0x33", () => {
+    // 0x30 has the date type nibble but the wrong low nibble; the low nibble
+    // of a date is not a width field, so only 0x33 is valid.
+    const badMarker = singleObjectBinaryPlist([0x30, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(() => parseBinaryPlist(badMarker)).toThrow(/0x33/u);
+  });
+
+  test("rejects a date payload that is not a representable Date", () => {
+    // 0x33 followed by the IEEE 754 bit pattern for NaN.
+    const nanDate = singleObjectBinaryPlist([0x33, 0x7f, 0xf8, 0, 0, 0, 0, 0, 0]);
+    expect(() => parseBinaryPlist(nanDate)).toThrow(PlistParseError);
+  });
+
+  test("rejects a non-ASCII byte inside an ASCII string object", () => {
+    // 0x51: ASCII string of length 1; 0x80 is outside the ASCII range and
+    // would only ever appear in a UTF-16 (0x6n) string object.
+    const nonAscii = singleObjectBinaryPlist([0x51, 0x80]);
+    expect(() => parseBinaryPlist(nonAscii)).toThrow(/non-ASCII/u);
   });
 
   test("reports the byte offset in the error position", () => {

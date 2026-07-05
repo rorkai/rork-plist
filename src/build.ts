@@ -171,8 +171,14 @@ class Builder {
   private appendNumber(value: number, path: string, depth: number): void {
     if (Number.isInteger(value)) {
       // Negative zero normalizes to zero; the two are indistinguishable
-      // after a parse round trip anyway.
-      this.appendLine(depth, `<integer>${value === 0 ? 0 : value}</integer>`);
+      // after a parse round trip anyway. Serialize through bigint so the
+      // 64-bit range check runs and the digits never render in exponential
+      // notation (`1e21` etc.), which the <integer> grammar cannot carry.
+      const integer = BigInt(value === 0 ? 0 : value);
+      if (integer < PLIST_INTEGER_MIN || integer > PLIST_INTEGER_MAX) {
+        throw new PlistBuildError(`integer ${value} overflows the 64-bit <integer> range`, path);
+      }
+      this.appendLine(depth, `<integer>${integer}</integer>`);
       return;
     }
     if (!Number.isFinite(value)) {

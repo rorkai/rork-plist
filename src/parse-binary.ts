@@ -109,6 +109,27 @@ class BinaryParser {
   private objectCount = 0;
 
   /**
+   * Caches each object's resolved value by index. The object table is a graph:
+   * one object can be referenced from many places, so resolving each index at
+   * most once is both a correctness guard and the main throughput win.
+   *
+   * Correctness: without it, a table like `A[n] = [A[n-1], A[n-1]]` re-resolves
+   * `A[n-1]` twice at every level, expanding a tiny buffer to `2^n` allocations
+   * while staying under {@link maxDepth}.
+   *
+   * Throughput: the format interns strings, so one `<dict>` key shared across
+   * hundreds of dictionaries is a single object referenced hundreds of times;
+   * caching decodes it once instead of once per reference. Every object is
+   * cached (not just containers) because that reuse is where the win is, and a
+   * per-object map hit is far cheaper than re-decoding a string.
+   *
+   * A referenced object resolves to one shared instance, as the platform
+   * reader does. `undefined` is never a property list value, so it is a safe
+   * "not yet resolved" sentinel.
+   */
+  private readonly resolved = new Map<number, PlistValue>();
+
+  /**
    * @param bytes The binary document to read.
    * @param maxDepth Maximum container nesting depth, which also bounds
    *   reference cycles.
@@ -178,10 +199,30 @@ class BinaryParser {
    *   is what stops reference cycles from recursing forever.
    */
   private parseObject(index: number, depth: number): PlistValue {
+    // An object already resolved once is returned as its shared instance,
+    // which both bounds work on documents that reuse objects and keeps the
+    // graph's reference sharing.
+    const cached = this.resolved.get(index);
+    if (cached !== undefined) {
+      return cached;
+    }
     if (depth > this.maxDepth) {
       this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`, this.objectOffset(index));
     }
 
+    const value = this.resolveObject(index, depth);
+    this.resolved.set(index, value);
+    return value;
+  }
+
+  /**
+   * Decodes the object at `index` from its marker byte. {@link parseObject}
+   * owns the resolved-object cache; this method only reads and builds.
+   *
+   * The marker's high nibble is the type and, for most types, the low nibble
+   * carries a size or count.
+   */
+  private resolveObject(index: number, depth: number): PlistValue {
     const offset = this.objectOffset(index);
     const marker = this.u8(offset);
     const objectType = marker >> 4;
@@ -195,7 +236,7 @@ class BinaryParser {
       case 0x2:
         return this.parseReal(offset, 1 << objectInfo);
       case 0x3:
-        return this.parseDate(offset);
+        return this.parseDate(offset, objectInfo);
       case 0x4:
         return this.parseData(offset);
       case 0x5:
@@ -286,11 +327,25 @@ class BinaryParser {
    * `Date`. The result is rounded to the nearest millisecond — a `Date` holds
    * integer milliseconds, so this recovers the intended value from the
    * floating-point seconds representation rather than leaving a 1-ulp error.
+   *
+   * The date marker is always `0x33` (an 8-byte payload); the low nibble is
+   * not a width field. A different low nibble, or a payload that is `NaN`, an
+   * infinity, or beyond the `Date` range, is malformed and fails rather than
+   * yielding an `Invalid Date`.
+   *
+   * @param objectInfo The marker's low nibble, which must be `0x3`.
    */
-  private parseDate(offset: number): Date {
+  private parseDate(offset: number, objectInfo: number): Date {
+    if (objectInfo !== 0x3) {
+      this.fail("binary <date> marker is not 0x33", offset);
+    }
     this.requireBytes(offset + 1, 8);
     const secondsSinceEpoch = this.view.getFloat64(offset + 1);
-    return new Date(Math.round((secondsSinceEpoch + PLIST_DATE_EPOCH_OFFSET_SECONDS) * 1000));
+    const date = new Date(Math.round((secondsSinceEpoch + PLIST_DATE_EPOCH_OFFSET_SECONDS) * 1000));
+    if (Number.isNaN(date.getTime())) {
+      this.fail("binary <date> payload is not a representable date", offset);
+    }
+    return date;
   }
 
   /**
@@ -305,14 +360,20 @@ class BinaryParser {
 
   /**
    * Resolves an ASCII `string` object: one byte per character, each a code
-   * point in 0–127.
+   * point in 0–127. A byte above `0x7f` is out of spec — the writer encodes
+   * such strings as UTF-16 (the `0x6n` marker) — so it fails rather than being
+   * silently reinterpreted as a Latin-1 character.
    */
   private parseAsciiString(offset: number): string {
     const { count, start } = this.readLength(offset);
     this.requireBytes(start, count);
     let out = "";
     for (let i = 0; i < count; i++) {
-      out += String.fromCharCode(this.u8(start + i));
+      const byte = this.u8(start + i);
+      if (byte > 0x7f) {
+        this.fail("binary ASCII <string> contains a non-ASCII byte", start + i);
+      }
+      out += String.fromCharCode(byte);
     }
     return out;
   }

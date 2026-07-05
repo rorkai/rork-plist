@@ -99,6 +99,13 @@ describe("numbers", () => {
     expect(() => buildPlist(-9223372036854775809n)).toThrow(PlistBuildError);
   });
 
+  test("rejects integral numbers outside the 64-bit range", () => {
+    // Integer-valued doubles skip the bigint path but must not silently emit
+    // exponential notation (`1e+40`) that the <integer> grammar cannot carry.
+    expect(() => buildPlist(1e40)).toThrow(PlistBuildError);
+    expect(() => buildPlist(-1e19)).toThrow(PlistBuildError);
+  });
+
   test("rejects NaN and infinities", () => {
     expect(() => buildPlist(NaN)).toThrow(PlistBuildError);
     expect(() => buildPlist(Infinity)).toThrow(PlistBuildError);

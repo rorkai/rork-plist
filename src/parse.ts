@@ -63,8 +63,13 @@ import type { PlistArray, PlistDictionary, PlistValue } from "./types";
 
 export type { ParsePlistOptions } from "./parse-options";
 
-/** Decodes UTF-8 bytes to a string for the XML path of {@link parsePlist}. */
-const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+/**
+ * Decodes UTF-8 bytes to a string for the XML path of {@link parsePlist}.
+ * `fatal` makes malformed byte sequences throw instead of decoding to the
+ * replacement character, so a corrupt buffer fails loudly rather than parsing
+ * into silently mangled string values.
+ */
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 /** Decimal or `0x`-prefixed hexadecimal digits with an optional sign. */
 const INTEGER_PATTERN = /^[+-]?(?:0[xX][0-9a-fA-F]+|[0-9]+)$/u;
@@ -222,7 +227,15 @@ export function parsePlist(input: string | Uint8Array, options: ParsePlistOption
     if (hasBinaryPlistMagic(input)) {
       return parseBinaryPlist(input, options);
     }
-    return parseXml(utf8Decoder.decode(input), options);
+    let xml: string;
+    try {
+      xml = utf8Decoder.decode(input);
+    } catch {
+      // TextDecoder throws a TypeError on invalid UTF-8; surface it as the
+      // library's own parse error so callers catch one type either way.
+      throw new PlistParseError("input is not valid UTF-8", input, 0);
+    }
+    return parseXml(xml, options);
   }
   return parseXml(input, options);
 }
