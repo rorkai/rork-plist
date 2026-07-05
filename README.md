@@ -3,7 +3,7 @@
 [![CI](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml/badge.svg)](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/rork-plist)](https://www.npmjs.com/package/rork-plist)
 
-Zero-dependency Apple property list (plist) parser and builder for JavaScript, built to behave identically in every runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
+Zero-dependency Apple property list (plist) parser and builder for JavaScript, built to behave identically in every runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native. Parses both XML and binary (`bplist00`) plists; builds XML.
 
 ```ts
 import { parsePlist, buildPlist } from "rork-plist";
@@ -20,6 +20,9 @@ const value = parsePlist(`<?xml version="1.0" encoding="UTF-8"?>
 // { name: "Rork", payload: Uint8Array [1, 2, 254] }
 
 const xml = buildPlist({ device: "iPhone17,1", enabled: true });
+
+// A buffer is auto-detected: binary bplist00, otherwise UTF-8 XML.
+const fromBundle = parsePlist(await readFile("Info.plist")); // Uint8Array in, value out
 ```
 
 ## Why
@@ -28,7 +31,7 @@ Property lists are the wire format of Apple's ecosystem — authentication excha
 
 `rork-plist` is designed for exactly that situation:
 
-- **Zero dependencies.** The plist grammar is a small, closed vocabulary defined by the [PropertyList-1.0 DTD](https://www.apple.com/DTDs/PropertyList-1.0.dtd). It does not need a general-purpose XML stack; a dedicated scanner is smaller, faster, and immune to entity-expansion attacks by construction.
+- **Zero dependencies.** The plist grammar is a small, closed vocabulary defined by the [PropertyList-1.0 DTD](https://www.apple.com/DTDs/PropertyList-1.0.dtd). It does not need a general-purpose XML stack; a dedicated scanner is smaller, faster, and immune to entity-expansion attacks by construction. Binary plists decode straight from a `DataView` with no native addon or WASM blob.
 - **One artifact, one code path.** A single ESM file with named exports. No environment-conditional entry points, no CommonJS default-export ambiguity, no reliance on ambient globals like `DOMParser` or `Buffer`. What you test locally is what runs in production, whatever the bundler.
 - **`Uint8Array` native.** `<data>` parses to `Uint8Array` and any `ArrayBufferView` serializes from exactly its view window — never its whole backing buffer, so subarray views into larger protocol buffers encode correctly.
 - **Loud failure modes.** Corrupt base64, malformed numbers, unbalanced markup, unrepresentable values — everything fails with a typed error carrying position (parse) or value-path (build) context. Payloads are never silently truncated or dropped.
@@ -41,15 +44,20 @@ pnpm add rork-plist
 
 ## API
 
-### `parsePlist(xml, options?)`
+### `parsePlist(input, options?)`
 
-Parses an XML property list string into JavaScript values. Accepts complete documents (XML declaration, DOCTYPE, `<plist>` wrapper) as well as bare root elements.
+Parses a property list into JavaScript values. `input` is `string | Uint8Array`:
+
+- a **string** is parsed as XML;
+- a **`Uint8Array`** is parsed as binary when it carries the `bplist00` magic, and otherwise decoded as UTF-8 and parsed as XML.
+
+XML accepts complete documents (XML declaration, DOCTYPE, `<plist>` wrapper) as well as bare root elements.
 
 ```ts
 import { parsePlist, PlistParseError } from "rork-plist";
 
 try {
-  const value = parsePlist(xml);
+  const value = parsePlist(input); // XML string, or bytes of either format
 } catch (error) {
   if (error instanceof PlistParseError) {
     console.error(error.message); // "unknown element <widget> (line 4, column 2)"
@@ -58,11 +66,15 @@ try {
 }
 ```
 
-Options:
+### `parseBinaryPlist(bytes, options?)`
 
-| Option     | Default | Description                                                                                            |
-| ---------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `maxDepth` | `512`   | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth on adversarial documents. |
+Parses a binary (`bplist00`) property list explicitly, skipping the format sniffing `parsePlist` does. Use it when you already know the input is binary; otherwise `parsePlist` handles both.
+
+Both parsers accept the same options:
+
+| Option     | Default | Description                                                                                                          |
+| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `maxDepth` | `512`   | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles. |
 
 ### `buildPlist(value, options?)`
 
@@ -89,20 +101,24 @@ The strict RFC 4648 codec used for `<data>` elements, exported because protocol 
 
 ## Value mapping
 
+The mapping is identical for XML and binary input. `Date` values keep millisecond precision from binary, second precision from XML.
+
 | Plist element         | JavaScript value                                       |
 | --------------------- | ------------------------------------------------------ |
 | `<string>`, `<key>`   | `string`                                               |
 | `<integer>`           | `number`, or `bigint` beyond `Number.MAX_SAFE_INTEGER` |
 | `<real>`              | `number`                                               |
 | `<true/>`, `<false/>` | `boolean`                                              |
-| `<date>`              | `Date` (UTC, second precision)                         |
+| `<date>`              | `Date` (UTC)                                           |
 | `<data>`              | `Uint8Array`                                           |
 | `<array>`             | `PlistValue[]`                                         |
 | `<dict>`              | plain object, keys in document order                   |
 
 ## Behavior notes
 
-Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS.
+Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents — XML and binary — against the platform plist utility on macOS.
+
+- **Binary plists** (`bplist00`) are parse-only; building always emits XML, which every Apple parser reads. `parsePlist` auto-detects binary vs. XML from a buffer, or use `parseBinaryPlist` directly. UID objects (used by keyed archives, not plain property lists) are rejected; sets are read as arrays, matching how the platform tooling widens them.
 
 - **64-bit integers.** `<integer>` covers the full signed/unsigned 64-bit window `[-(2^63), 2^64 - 1]`; values beyond that fail to parse and to build. Values that exceed `Number.MAX_SAFE_INTEGER` parse as `bigint`, so identifiers and tokens never lose precision silently. Hexadecimal spellings (`0x1F`, `-0x10`) parse like the reference implementation.
 - **Reals.** `nan`, `inf`, `-inf`, and `infinity` spellings parse to the corresponding IEEE 754 values. Building rejects `NaN` and infinities — emitting them is almost always a caller bug in the protocols this library serves.

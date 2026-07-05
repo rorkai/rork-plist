@@ -18,5 +18,7 @@
 export { decodeBase64, encodeBase64 } from "./base64";
 export { buildPlist, type BuildPlistOptions } from "./build";
 export { PlistBuildError, PlistParseError, type PlistErrorPosition } from "./errors";
-export { parsePlist, type ParsePlistOptions } from "./parse";
+export { parsePlist } from "./parse";
+export { parseBinaryPlist } from "./parse-binary";
+export type { ParsePlistOptions } from "./parse-options";
 export type { PlistArray, PlistDictionary, PlistValue } from "./types";
