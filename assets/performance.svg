@@ -64,27 +64,27 @@
       <text x="88" y="304">auth response</text>
       <text x="300" y="304">0.9 KiB</text>
       <text x="408" y="304">1.1 &#181;s</text>
-      <text x="516" y="304">3.0 &#181;s</text>
+      <text x="516" y="304">2.1 &#181;s</text>
       <text x="624" y="304" fill="#3fb950">800 MiB/s</text>
-      <text x="768" y="304" fill="#3fb950">290 MiB/s</text>
+      <text x="768" y="304" fill="#3fb950">420 MiB/s</text>
     </g>
 
     <g fill="#e6edf3">
       <text x="88" y="336">device list &#215;500</text>
       <text x="300" y="336">55 KiB</text>
-      <text x="408" y="336">0.19 ms</text>
-      <text x="516" y="336">0.65 ms</text>
-      <text x="624" y="336" fill="#3fb950">280 MiB/s</text>
-      <text x="768" y="336" fill="#3fb950">80 MiB/s</text>
+      <text x="408" y="336">0.20 ms</text>
+      <text x="516" y="336">0.50 ms</text>
+      <text x="624" y="336" fill="#3fb950">270 MiB/s</text>
+      <text x="768" y="336" fill="#3fb950">110 MiB/s</text>
     </g>
 
     <g fill="#e6edf3">
       <text x="88" y="368">profile (data-heavy)</text>
       <text x="300" y="368">493 KiB</text>
       <text x="408" y="368">20 &#181;s</text>
-      <text x="516" y="368">23 &#181;s</text>
+      <text x="516" y="368">20 &#181;s</text>
       <text x="624" y="368" fill="#3fb950">24 GiB/s</text>
-      <text x="768" y="368" fill="#3fb950">21 GiB/s</text>
+      <text x="768" y="368" fill="#3fb950">24 GiB/s</text>
     </g>
 
     <line x1="64" y1="396" x2="896" y2="396" stroke="#30363d" />

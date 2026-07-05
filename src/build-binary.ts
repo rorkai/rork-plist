@@ -22,9 +22,13 @@
  * @module
  */
 
-import { encodeBase64 } from "./base64";
 import { PlistBuildError } from "./errors";
-import { PLIST_INTEGER_MAX, PLIST_INTEGER_MIN } from "./internal/integer-range";
+import {
+  MAX_SAFE_INTEGER_BIGINT,
+  MIN_SAFE_INTEGER_BIGINT,
+  PLIST_INTEGER_MAX,
+  PLIST_INTEGER_MIN,
+} from "./internal/integer-range";
 import type { PlistValue } from "./types";
 
 /** `bplist00` — the 8-byte magic every binary property list starts with. */
@@ -43,14 +47,30 @@ const PLIST_DATE_EPOCH_OFFSET_SECONDS = 978_307_200;
 /**
  * Largest `<data>` payload deduplicated by content rather than by identity.
  *
- * Content keying costs a full pass over the payload on every occurrence, so
- * it must stay proportional to the small repeated tokens it exists for —
- * session keys, hashes, certificates. Above this size the pass would dominate
- * the whole build (measured: keying a 500 KB payload was ~40% of build time)
- * to catch a duplicate that essentially never occurs by value at that size.
- * Large payloads still deduplicate when the caller reuses one view object.
+ * Content dedup buckets payloads by length and compares bytes with an early
+ * exit, so distinct payloads part ways after a handful of bytes and only a
+ * true duplicate pays a full-length compare. The cap keeps that worst case
+ * proportional to the small repeated tokens content dedup exists for —
+ * session keys, hashes, certificates. Above it, payloads deduplicate by view
+ * identity only (measured before the cap: content-keying a 500 KB payload
+ * was ~40% of the whole build).
  */
 const DATA_CONTENT_KEY_MAX_BYTES = 4096;
+
+/**
+ * The 256 one-byte encodings, shared by every builder instance. Markers with
+ * inline counts, boolean singletons, and one-byte headers are all single
+ * bytes; reusing frozen pieces removes an allocation per object from the
+ * build hot path (they are only ever read back into the output buffer).
+ */
+const BYTE_PIECES: readonly Uint8Array[] = Array.from({ length: 256 }, (_, byte) => Uint8Array.of(byte));
+
+/**
+ * Scratch view for IEEE 754 encoding. `<real>` and `<date>` payloads write
+ * the float here and copy eight bytes out, which avoids allocating a
+ * `DataView` per encoded object (visible in build profiles).
+ */
+const FLOAT64_SCRATCH = new DataView(new ArrayBuffer(8));
 
 /**
  * A resolved entry in the object table. Scalars are encoded eagerly during
@@ -95,11 +115,23 @@ function byteWidth(value: number): number {
   return 8;
 }
 
-/** Writes `value` as `size` big-endian bytes into `target` starting at `pos`. */
+/**
+ * Writes `value` as `size` big-endian bytes into `target` starting at `pos`.
+ *
+ * Sizes above four split into 32-bit halves so the byte loop can use integer
+ * shifts; the float division a single loop would need showed up in build
+ * profiles (this runs for every offset-table entry and object reference).
+ */
 function writeUintBE(target: Uint8Array, pos: number, value: number, size: number): void {
+  if (size > 4) {
+    writeUintBE(target, pos, Math.floor(value / 0x1_0000_0000), size - 4);
+    pos += size - 4;
+    size = 4;
+    value = value % 0x1_0000_0000;
+  }
   for (let i = size - 1; i >= 0; i--) {
     target[pos + i] = value & 0xff;
-    value = Math.floor(value / 256);
+    value >>>= 8;
   }
 }
 
@@ -116,16 +148,26 @@ class BinaryBuilder {
    * primitive values replace a single string-keyed map because building a
    * canonical key string per scalar (`i:42`, `d:1751624430000`) allocated on
    * every occurrence — including cache hits — and dominated dictionary-heavy
-   * builds. Integers key by bigint (`number` inputs normalize first), so the
-   * `42` and `42n` spellings still intern to one object.
+   * builds.
+   *
+   * Integers within the safe-integer window key by `number`; only magnitudes
+   * beyond it key by `bigint` (each spelling of such a value converts
+   * exactly, so `42` and `42n` still intern to one object). The split keeps
+   * bigint allocation off the common lookup path.
    */
   private readonly stringIndex = new Map<string, number>();
-  private readonly integerIndex = new Map<bigint, number>();
+  private readonly integerNumberIndex = new Map<number, number>();
+  private readonly integerBigIntIndex = new Map<bigint, number>();
   private readonly realIndex = new Map<number, number>();
   private readonly dateIndex = new Map<number, number>();
 
-  /** Interned `<data>` indices by base64 content, for payloads small enough to key. */
-  private readonly dataContentIndex = new Map<string, number>();
+  /**
+   * Interned `<data>` indices bucketed by payload length, for payloads small
+   * enough to content-key. Distinct same-length payloads separate at the
+   * first differing byte, so a bucket scan is effectively free until a true
+   * duplicate (which pays one full compare instead of the copy it saves).
+   */
+  private readonly dataContentIndex = new Map<number, { bytes: Uint8Array; index: number }[]>();
 
   /** Interned `<data>` indices by view identity, for payloads above the content-key cap. */
   private readonly dataViewIndex = new Map<ArrayBufferView, number>();
@@ -166,8 +208,14 @@ class BinaryBuilder {
     let writeCursor = MAGIC.length;
     for (const pieces of encoded) {
       for (const piece of pieces) {
-        out.set(piece, writeCursor);
-        writeCursor += piece.length;
+        // Most pieces are one-byte markers; a direct store skips the
+        // typed-array set() machinery for them.
+        if (piece.length === 1) {
+          out[writeCursor++] = piece[0]!;
+        } else {
+          out.set(piece, writeCursor);
+          writeCursor += piece.length;
+        }
       }
     }
     for (let i = 0; i < objectCount; i++) {
@@ -230,8 +278,13 @@ class BinaryBuilder {
    */
   private internNumber(value: number, path: string): number {
     if (Number.isInteger(value)) {
-      // Negative zero normalizes to zero before the bigint conversion.
-      return this.internInteger(this.checkedBigInt(BigInt(value === 0 ? 0 : value), path));
+      // Safe-range integers are inside the 64-bit window by construction, so
+      // they skip both the range check and the bigint conversion; -0
+      // normalizes to 0 (SameValueZero map keys treat them as one anyway).
+      if (value >= Number.MIN_SAFE_INTEGER && value <= Number.MAX_SAFE_INTEGER) {
+        return this.internSafeInteger(value === 0 ? 0 : value);
+      }
+      return this.internInteger(this.checkedBigInt(BigInt(value), path));
     }
     if (!Number.isFinite(value)) {
       throw new PlistBuildError(`${value} cannot be written to a property list`, path);
@@ -292,13 +345,18 @@ class BinaryBuilder {
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
 
     if (bytes.byteLength <= DATA_CONTENT_KEY_MAX_BYTES) {
-      const key = encodeBase64(bytes);
-      const existing = this.dataContentIndex.get(key);
-      if (existing !== undefined) {
-        return existing;
+      let bucket = this.dataContentIndex.get(bytes.byteLength);
+      if (bucket === undefined) {
+        bucket = [];
+        this.dataContentIndex.set(bytes.byteLength, bucket);
+      }
+      for (const candidate of bucket) {
+        if (bytesEqual(candidate.bytes, bytes)) {
+          return candidate.index;
+        }
       }
       const index = this.appendScalar([this.sizeHeader(0x40, bytes.length), bytes]);
-      this.dataContentIndex.set(key, index);
+      bucket.push({ bytes, index });
       return index;
     }
 
@@ -322,14 +380,32 @@ class BinaryBuilder {
     return index;
   }
 
-  /** Interns a 64-bit-checked integer, deduplicating by value. */
+  /** Interns a safe-range integer through the number-keyed map. */
+  private internSafeInteger(value: number): number {
+    const existing = this.integerNumberIndex.get(value);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const index = this.appendScalar([this.encodeInteger(BigInt(value))]);
+    this.integerNumberIndex.set(value, index);
+    return index;
+  }
+
+  /**
+   * Interns a 64-bit-checked bigint integer. Safe-range magnitudes delegate
+   * to the number-keyed map so a value reached via both spellings (`42` and
+   * `42n`) still interns to a single object.
+   */
   private internInteger(value: bigint): number {
-    const existing = this.integerIndex.get(value);
+    if (value >= MIN_SAFE_INTEGER_BIGINT && value <= MAX_SAFE_INTEGER_BIGINT) {
+      return this.internSafeInteger(Number(value));
+    }
+    const existing = this.integerBigIntIndex.get(value);
     if (existing !== undefined) {
       return existing;
     }
     const index = this.appendScalar([this.encodeInteger(value)]);
-    this.integerIndex.set(value, index);
+    this.integerBigIntIndex.set(value, index);
     return index;
   }
 
@@ -339,7 +415,7 @@ class BinaryBuilder {
     if (existing !== -1) {
       return existing;
     }
-    const index = this.appendScalar([new Uint8Array([value ? 0x09 : 0x08])]);
+    const index = this.appendScalar([BYTE_PIECES[value ? 0x09 : 0x08]!]);
     if (value) {
       this.trueIndex = index;
     } else {
@@ -459,7 +535,7 @@ class BinaryBuilder {
    */
   private sizeHeader(marker: number, count: number): Uint8Array {
     if (count < 0x0f) {
-      return new Uint8Array([marker | count]);
+      return BYTE_PIECES[marker | count]!;
     }
     const countBytes = this.encodeInteger(BigInt(count));
     const out = new Uint8Array(1 + countBytes.length);
@@ -498,18 +574,12 @@ class BinaryBuilder {
 
   /** Encodes a `<real>` object as a big-endian 8-byte double. */
   private encodeReal(value: number): Uint8Array {
-    const out = new Uint8Array(9);
-    out[0] = 0x23;
-    new DataView(out.buffer).setFloat64(1, value);
-    return out;
+    return encodeMarkedFloat64(0x23, value);
   }
 
   /** Encodes a `<date>` object as seconds since the property list date epoch. */
   private encodeDate(time: number): Uint8Array {
-    const out = new Uint8Array(9);
-    out[0] = 0x33;
-    new DataView(out.buffer).setFloat64(1, time / 1000 - PLIST_DATE_EPOCH_OFFSET_SECONDS);
-    return out;
+    return encodeMarkedFloat64(0x33, time / 1000 - PLIST_DATE_EPOCH_OFFSET_SECONDS);
   }
 
   /**
@@ -549,3 +619,34 @@ type PlistArrayInput = readonly PlistValue[];
 
 /** A plain object of property list values as seen by the interner. */
 type PlistDictInput = Record<string, PlistValue | undefined>;
+
+/**
+ * Encodes a marker byte followed by a big-endian IEEE 754 double, through
+ * {@link FLOAT64_SCRATCH} so no per-object `DataView` is allocated.
+ */
+function encodeMarkedFloat64(marker: number, value: number): Uint8Array {
+  const out = new Uint8Array(9);
+  out[0] = marker;
+  FLOAT64_SCRATCH.setFloat64(0, value);
+  for (let i = 0; i < 8; i++) {
+    out[i + 1] = FLOAT64_SCRATCH.getUint8(i);
+  }
+  return out;
+}
+
+/**
+ * Byte-wise equality with an early exit, used by content dedup. Distinct
+ * payloads of equal length usually differ within the first few bytes, so the
+ * common miss costs almost nothing; only a true duplicate scans to the end.
+ */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}

@@ -151,6 +151,31 @@ describe("parsePlist auto-detection", () => {
   });
 });
 
+describe("the data option", () => {
+  // A single <data> object of two bytes; its payload sits at bytes 9-10,
+  // right after the magic (8) and the 0x42 marker.
+  const DATA_DOC = () => singleObjectBinaryPlist([0x42, 0xaa, 0xbb]);
+
+  test("copies payloads out of the input buffer by default", () => {
+    const doc = DATA_DOC();
+    const parsed = parseBinaryPlist(doc) as Uint8Array;
+
+    expect(parsed).toEqual(new Uint8Array([0xaa, 0xbb]));
+    expect(parsed.buffer).not.toBe(doc.buffer);
+    parsed[0] = 0;
+    expect(doc[9]).toBe(0xaa); // the document is untouched
+  });
+
+  test("data: 'view' aliases the input buffer without copying", () => {
+    const doc = DATA_DOC();
+    const parsed = parseBinaryPlist(doc, { data: "view" }) as Uint8Array;
+
+    expect(parsed).toEqual(new Uint8Array([0xaa, 0xbb]));
+    expect(parsed.buffer).toBe(doc.buffer);
+    expect(parsed.byteOffset).toBe(9);
+  });
+});
+
 describe("shared object references", () => {
   test("resolves repeated references to one shared value without expanding", () => {
     // Height 60 is 2^60 leaf visits without memoization — the test would not

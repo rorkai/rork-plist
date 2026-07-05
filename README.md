@@ -75,9 +75,12 @@ Parses a binary (`bplist00`) property list explicitly, skipping the format sniff
 
 Both parsers accept the same options:
 
-| Option     | Default | Description                                                                                                          |
-| ---------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `maxDepth` | `512`   | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles. |
+| Option     | Default  | Description                                                                                                                                                                          |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data`     | `"copy"` | How binary `<data>` payloads relate to the input buffer: `"copy"` gives payloads that own their memory; `"view"` gives `subarray` views that alias the input and skip the copy. |
+| `maxDepth` | `512`   | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles.                                                                 |
+
+Use `data: "view"` to pull fields out of a large document you control and will not mutate — parsing a data-heavy document this way runs at the cost of the scan alone, with zero payload copying. The default stays `"copy"` because views cut both ways: writing through one corrupts the source bytes, and retaining one keeps the entire input buffer alive.
 
 ### `buildPlist(value, options?)`
 
@@ -146,21 +149,21 @@ Parsing follows the grammar accepted by Apple's own tooling; the test suite cros
 Run benchmarks with `pnpm bench`; it builds first and measures the published artifact.
 
 <p align="center">
-  <img src="assets/performance.svg" alt="Benchmark table: in XML form, an auth response parses in 3.4 microseconds and builds in 1.1 microseconds, a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds, and a data-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds; in binary form, the auth response parses in 1.1 microseconds and builds in 3.0 microseconds, the device list parses in 0.19 milliseconds and builds in 0.65 milliseconds, and the profile parses in 20 microseconds and builds in 23 microseconds" width="880" />
+  <img src="assets/performance.svg" alt="Benchmark table: in XML form, an auth response parses in 3.4 microseconds and builds in 1.1 microseconds, a 500-entry device list parses in 0.72 milliseconds and builds in 0.42 milliseconds, and a data-heavy profile parses in 0.71 milliseconds and builds in 79 microseconds; in binary form, the auth response parses in 1.1 microseconds and builds in 2.1 microseconds, the device list parses in 0.20 milliseconds and builds in 0.50 milliseconds, and the profile parses in 20 microseconds and builds in 20 microseconds" width="880" />
 </p>
 
 | Document                        | Format | Size    | Parse   | Build   | Parse speed | Build speed |
 | ------------------------------- | ------ | ------- | ------- | ------- | ----------- | ----------- |
 | auth response                   | XML    | 1.5 KiB | 3.4 µs  | 1.1 µs  | ~430 MiB/s  | ~1.2 GiB/s  |
-| auth response                   | binary | 0.9 KiB | 1.1 µs  | 3.0 µs  | ~800 MiB/s  | ~290 MiB/s  |
+| auth response                   | binary | 0.9 KiB | 1.1 µs  | 2.1 µs  | ~800 MiB/s  | ~420 MiB/s  |
 | device list (500 dated entries) | XML    | 179 KiB | 0.72 ms | 0.42 ms | ~240 MiB/s  | ~420 MiB/s  |
-| device list (500 dated entries) | binary | 55 KiB  | 0.19 ms | 0.65 ms | ~280 MiB/s  | ~80 MiB/s   |
+| device list (500 dated entries) | binary | 55 KiB  | 0.20 ms | 0.50 ms | ~270 MiB/s  | ~110 MiB/s  |
 | profile (data-heavy)            | XML    | 658 KiB | 0.71 ms | 79 µs   | ~900 MiB/s  | ~7.9 GiB/s  |
-| profile (data-heavy)            | binary | 493 KiB | 20 µs   | 23 µs   | ~24 GiB/s   | ~21 GiB/s   |
+| profile (data-heavy)            | binary | 493 KiB | 20 µs   | 20 µs   | ~24 GiB/s   | ~24 GiB/s   |
 
-Measured on an Apple M5 Max, Node.js 24, single thread.
+Measured on an Apple M5 Max, Node.js 24, single thread. With `data: "view"`, the data-heavy profile parses in ~1 µs — the structural scan alone, no payload copies.
 
-Binary reads beat XML reads because object lengths are explicit — nothing is scanned — and `<data>` payloads transfer as plain byte copies instead of base64 decoding, which is why the data-heavy profile parses at memory-copy speed. Parsed values always own their memory: payloads are copied out of the input buffer, never aliased into it, so mutating a parsed value can never corrupt the source document (and holding a small payload never pins a large input buffer alive). Binary writes split by shape: dictionary-heavy documents pay for the format's object table — per-value interning that streaming XML text does not need — while data-heavy documents build far faster in binary because payload bytes are copied once instead of base64-encoded. The dispatch checks that route `parsePlist` between formats are branch-predicted noise; the XML numbers are identical with binary support in the tree.
+Binary reads beat XML reads because object lengths are explicit — nothing is scanned — and `<data>` payloads transfer as plain byte copies instead of base64 decoding, which is why the data-heavy profile parses at memory-copy speed. By default parsed values own their memory: payloads are copied out of the input buffer, never aliased into it, so mutating a parsed value can never corrupt the source document and holding a small payload never pins a large input buffer alive; `data: "view"` trades that guarantee away explicitly. Binary writes split by shape: dictionary-heavy documents pay for the format's object table — per-value interning that streaming XML text does not need — while data-heavy documents build far faster in binary because payload bytes are copied once instead of base64-encoded. The dispatch checks that route `parsePlist` between formats are branch-predicted noise; the XML numbers are identical with binary support in the tree.
 
 ### Key performance features
 

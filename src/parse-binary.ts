@@ -66,10 +66,11 @@ export function hasBinaryPlistMagic(bytes: Uint8Array): boolean {
  * Parses a binary property list (`bplist00`) into JavaScript values.
  *
  * See {@link PlistValue} for the value mapping. `<data>` objects become
- * `Uint8Array`, dates become `Date`, and integers follow the same 64-bit
- * window and `number`/`bigint` split as the XML parser. UID objects (used by
- * keyed archives, not by plain property lists) have no property list
- * representation and are rejected.
+ * `Uint8Array` — copies by default, or views into the input buffer with
+ * {@link ParsePlistOptions.data | data: "view"} — dates become `Date`, and
+ * integers follow the same 64-bit window and `number`/`bigint` split as the
+ * XML parser. UID objects (used by keyed archives, not by plain property
+ * lists) have no property list representation and are rejected.
  *
  * @param bytes The binary document. Only the view's window is read.
  * @param options See {@link ParsePlistOptions}.
@@ -78,7 +79,7 @@ export function hasBinaryPlistMagic(bytes: Uint8Array): boolean {
  *   the error's position carries the byte offset of the failure.
  */
 export function parseBinaryPlist(bytes: Uint8Array, options: ParsePlistOptions = {}): PlistValue {
-  return new BinaryParser(bytes, options.maxDepth ?? DEFAULT_MAX_DEPTH).parse();
+  return new BinaryParser(bytes, options.maxDepth ?? DEFAULT_MAX_DEPTH, options.data === "view").parse();
 }
 
 /**
@@ -107,6 +108,12 @@ class BinaryParser {
 
   /** Total number of objects in the table, from the trailer. */
   private objectCount = 0;
+
+  /** Element count of the last {@link readLength} call. */
+  private lengthCount = 0;
+
+  /** Content start offset of the last {@link readLength} call. */
+  private lengthStart = 0;
 
   /**
    * Caches each object's resolved value by index. The object table is a graph:
@@ -137,10 +144,13 @@ class BinaryParser {
    * @param bytes The binary document to read.
    * @param maxDepth Maximum container nesting depth, which also bounds
    *   reference cycles.
+   * @param dataAsViews When true, `<data>` payloads alias the input buffer
+   *   instead of being copied out; see {@link ParsePlistOptions.data}.
    */
   constructor(
     private readonly bytes: Uint8Array,
     private readonly maxDepth: number,
+    private readonly dataAsViews: boolean,
   ) {
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     this.byteLength = bytes.byteLength;
@@ -162,13 +172,15 @@ class BinaryParser {
     }
 
     // The trailer's meaningful fields start 6 bytes in (5 unused + sort
-    // version), then two width bytes and three 64-bit counts.
+    // version), then two width bytes and three 64-bit counts. The length
+    // check above proves the whole 32-byte span is in bounds, so the field
+    // reads skip per-read checks.
     const trailer = this.byteLength - TRAILER_SIZE;
-    this.offsetIntSize = this.u8(trailer + 6);
-    this.objectRefSize = this.u8(trailer + 7);
-    this.objectCount = this.readBigEndianUint(trailer + 8, 8);
-    const topObject = this.readBigEndianUint(trailer + 16, 8);
-    this.offsetTableOffset = this.readBigEndianUint(trailer + 24, 8);
+    this.offsetIntSize = this.bytes[trailer + 6]!;
+    this.objectRefSize = this.bytes[trailer + 7]!;
+    this.objectCount = this.readUintUnchecked(trailer + 8, 8);
+    const topObject = this.readUintUnchecked(trailer + 16, 8);
+    this.offsetTableOffset = this.readUintUnchecked(trailer + 24, 8);
 
     if (this.offsetIntSize < 1 || this.offsetIntSize > 8 || this.objectRefSize < 1 || this.objectRefSize > 8) {
       this.fail("binary property list trailer declares an invalid integer width", trailer);
@@ -218,39 +230,45 @@ class BinaryParser {
       this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`, this.objectOffset(index));
     }
 
-    const value = this.resolveObject(index, depth);
-    this.resolved[index] = value;
-    return value;
-  }
-
-  /**
-   * Decodes the object at `index` from its marker byte. {@link parseObject}
-   * owns the resolved-object cache; this method only reads and builds.
-   *
-   * The marker's high nibble is the type and, for most types, the low nibble
-   * carries a size or count.
-   */
-  private resolveObject(index: number, depth: number): PlistValue {
     const offset = this.objectOffset(index);
-    const marker = this.u8(offset);
-    const objectType = marker >> 4;
+    // objectOffset guarantees the offset lies inside the object region, so
+    // the marker byte reads without a second bounds check. The marker's high
+    // nibble is the type; for most types the low nibble is a size or count.
+    const marker = this.bytes[offset]!;
     const objectInfo = marker & 0x0f;
+    let value: PlistValue;
 
-    switch (objectType) {
+    switch (marker >> 4) {
+      // The 0x0n family holds the false (0x08) and true (0x09) singletons;
+      // the null (0x00) and fill (0x0f) markers have no property list
+      // representation and are rejected.
       case 0x0:
-        return this.parseSingleton(marker, offset);
+        if (marker !== 0x08 && marker !== 0x09) {
+          this.fail(
+            `binary marker 0x${marker.toString(16).padStart(2, "0")} has no property list representation`,
+            offset,
+          );
+        }
+        value = marker === 0x09;
+        break;
       case 0x1:
-        return this.parseInteger(offset, 1 << objectInfo);
+        value = this.parseInteger(offset, 1 << objectInfo);
+        break;
       case 0x2:
-        return this.parseReal(offset, 1 << objectInfo);
+        value = this.parseReal(offset, 1 << objectInfo);
+        break;
       case 0x3:
-        return this.parseDate(offset, objectInfo);
+        value = this.parseDate(offset, objectInfo);
+        break;
       case 0x4:
-        return this.parseData(offset);
+        value = this.parseData(offset, objectInfo);
+        break;
       case 0x5:
-        return this.parseAsciiString(offset);
+        value = this.parseAsciiString(offset, objectInfo);
+        break;
       case 0x6:
-        return this.parseUnicodeString(offset);
+        value = this.parseUnicodeString(offset, objectInfo);
+        break;
       case 0x8:
         this.fail("UID objects have no property list representation", offset);
         break;
@@ -258,27 +276,17 @@ class BinaryParser {
       // references — and the platform tooling widens sets to arrays in XML too.
       case 0xa:
       case 0xc:
-        return this.parseArray(offset, depth + 1);
+        value = this.parseArray(offset, objectInfo, depth + 1);
+        break;
       case 0xd:
-        return this.parseDict(offset, depth + 1);
+        value = this.parseDict(offset, objectInfo, depth + 1);
+        break;
       default:
         this.fail(`unknown binary object marker 0x${marker.toString(16).padStart(2, "0")}`, offset);
     }
-  }
 
-  /**
-   * Resolves a marker in the `0x0n` family: the `false` (0x08) and `true`
-   * (0x09) singletons. The null (0x00) and fill (0x0f) markers have no
-   * property list representation and are rejected.
-   */
-  private parseSingleton(marker: number, offset: number): boolean {
-    if (marker === 0x08) {
-      return false;
-    }
-    if (marker === 0x09) {
-      return true;
-    }
-    this.fail(`binary marker 0x${marker.toString(16).padStart(2, "0")} has no property list representation`, offset);
+    this.resolved[index] = value;
+    return value;
   }
 
   /**
@@ -357,12 +365,18 @@ class BinaryParser {
   }
 
   /**
-   * Resolves a `data` object into a standalone `Uint8Array` copied out of the
-   * input window.
+   * Resolves a `data` object: by default a standalone `Uint8Array` copied out
+   * of the input window, or a borrowed `subarray` view when the caller opted
+   * into {@link ParsePlistOptions.data | data: "view"}.
    */
-  private parseData(offset: number): Uint8Array {
-    const { count, start } = this.readLength(offset);
+  private parseData(offset: number, objectInfo: number): Uint8Array {
+    this.readLength(offset, objectInfo);
+    const count = this.lengthCount;
+    const start = this.lengthStart;
     this.requireBytes(start, count);
+    if (this.dataAsViews) {
+      return this.bytes.subarray(start, start + count);
+    }
     return this.bytes.slice(start, start + count);
   }
 
@@ -372,12 +386,17 @@ class BinaryParser {
    * such strings as UTF-16 (the `0x6n` marker) — so it fails rather than being
    * silently reinterpreted as a Latin-1 character.
    */
-  private parseAsciiString(offset: number): string {
-    const { count, start } = this.readLength(offset);
+  private parseAsciiString(offset: number, objectInfo: number): string {
+    this.readLength(offset, objectInfo);
+    const count = this.lengthCount;
+    const start = this.lengthStart;
     this.requireBytes(start, count);
+    // The span check above covers the whole string, so the loop can index the
+    // byte array directly instead of paying a bounds check per character.
+    const bytes = this.bytes;
     let out = "";
     for (let i = 0; i < count; i++) {
-      const byte = this.u8(start + i);
+      const byte = bytes[start + i]!;
       if (byte > 0x7f) {
         this.fail("binary ASCII <string> contains a non-ASCII byte", start + i);
       }
@@ -391,12 +410,15 @@ class BinaryParser {
    * as two big-endian bytes. JS strings are UTF-16, so the units pass straight
    * through.
    */
-  private parseUnicodeString(offset: number): string {
-    const { count, start } = this.readLength(offset);
+  private parseUnicodeString(offset: number, objectInfo: number): string {
+    this.readLength(offset, objectInfo);
+    const count = this.lengthCount;
+    const start = this.lengthStart;
     this.requireBytes(start, count * 2);
+    const view = this.view;
     let out = "";
     for (let i = 0; i < count; i++) {
-      out += String.fromCharCode(this.view.getUint16(start + i * 2));
+      out += String.fromCharCode(view.getUint16(start + i * 2));
     }
     return out;
   }
@@ -405,8 +427,10 @@ class BinaryParser {
    * Resolves an `array` (or set) object: a count followed by that many object
    * references, each resolved in turn.
    */
-  private parseArray(offset: number, depth: number): PlistArray {
-    const { count, start } = this.readLength(offset);
+  private parseArray(offset: number, objectInfo: number, depth: number): PlistArray {
+    this.readLength(offset, objectInfo);
+    const count = this.lengthCount;
+    const start = this.lengthStart;
     this.requireBytes(start, count * this.objectRefSize);
     const array: PlistArray = [];
     for (let i = 0; i < count; i++) {
@@ -420,8 +444,10 @@ class BinaryParser {
    * references. Keys must resolve to strings, and a literal `__proto__` key is
    * stored as an own property so untrusted documents cannot pollute prototypes.
    */
-  private parseDict(offset: number, depth: number): PlistDictionary {
-    const { count, start } = this.readLength(offset);
+  private parseDict(offset: number, objectInfo: number, depth: number): PlistDictionary {
+    this.readLength(offset, objectInfo);
+    const count = this.lengthCount;
+    const start = this.lengthStart;
     const valuesStart = start + count * this.objectRefSize;
     this.requireBytes(start, count * this.objectRefSize * 2);
 
@@ -447,31 +473,51 @@ class BinaryParser {
 
   /**
    * Reads a collection's element count and the offset where its contents
-   * begin. A low nibble below 0xF is the count itself; 0xF means the count is
-   * an inline integer object immediately after the marker.
+   * begin, leaving them in {@link lengthCount} and {@link lengthStart}. A low
+   * nibble below 0xF is the count itself; 0xF means the count is an inline
+   * integer object immediately after the marker.
+   *
+   * Results land in scratch fields rather than a returned pair because this
+   * runs for every string, data, array, and dict object; the fields are
+   * consumed immediately by the caller before any further parsing.
+   *
+   * @param offset Byte offset of the object's marker.
+   * @param objectInfo The marker's low nibble, already extracted by
+   *   {@link parseObject} so the marker byte is not re-read here.
    */
-  private readLength(offset: number): { count: number; start: number } {
-    const info = this.u8(offset) & 0x0f;
-    if (info !== 0x0f) {
-      return { count: info, start: offset + 1 };
+  private readLength(offset: number, objectInfo: number): void {
+    if (objectInfo !== 0x0f) {
+      this.lengthCount = objectInfo;
+      this.lengthStart = offset + 1;
+      return;
     }
     const sizeMarker = this.u8(offset + 1);
     if (sizeMarker >> 4 !== 0x1) {
       this.fail("binary length prefix is not an integer", offset + 1);
     }
     const intByteCount = 1 << (sizeMarker & 0x0f);
-    const count = this.readBigEndianUint(offset + 2, intByteCount);
-    return { count, start: offset + 2 + intByteCount };
+    this.lengthCount = this.readBigEndianUint(offset + 2, intByteCount);
+    this.lengthStart = offset + 2 + intByteCount;
   }
 
   /**
    * Reads one object reference and validates it against the object count.
+   * The read itself skips {@link requireBytes}: both containers span-check
+   * all their references in one call before looping. One- and two-byte
+   * widths — which cover practically every document — read directly, without
+   * the general width switch.
    *
    * @param offset Byte offset of the reference within a container.
    * @returns The referenced object's index into the offset table.
    */
   private readRef(offset: number): number {
-    const index = this.readBigEndianUint(offset, this.objectRefSize);
+    const size = this.objectRefSize;
+    const index =
+      size === 1
+        ? this.bytes[offset]!
+        : size === 2
+          ? this.view.getUint16(offset)
+          : this.readUintUnchecked(offset, size);
     if (index >= this.objectCount) {
       this.fail("binary object reference is out of range", offset);
     }
@@ -481,11 +527,19 @@ class BinaryParser {
   /**
    * Returns the byte offset of object `index` from the offset table, validated
    * to point into the object region (after the magic, before the table).
+   * The read skips {@link requireBytes}: {@link parse} validated the whole
+   * table span (`offsetTableOffset + objectCount * offsetIntSize`) up front,
+   * and every `index` is validated against `objectCount` before arriving here.
+   * One- and two-byte widths — which cover practically every document — read
+   * directly, without the general width switch.
    */
   private objectOffset(index: number): number {
-    const offset = this.readBigEndianUint(this.offsetTableOffset + index * this.offsetIntSize, this.offsetIntSize);
+    const size = this.offsetIntSize;
+    const entry = this.offsetTableOffset + index * size;
+    const offset =
+      size === 1 ? this.bytes[entry]! : size === 2 ? this.view.getUint16(entry) : this.readUintUnchecked(entry, size);
     if (offset < MAGIC.length || offset >= this.offsetTableOffset) {
-      this.fail("binary object offset is out of bounds", this.offsetTableOffset + index * this.offsetIntSize);
+      this.fail("binary object offset is out of bounds", entry);
     }
     return offset;
   }
@@ -494,14 +548,40 @@ class BinaryParser {
    * Reads a big-endian unsigned integer of `size` bytes as a number. Used for
    * offsets, references, and lengths, which are always well within the safe
    * integer range for any real document.
+   *
+   * The 1/2/4/8-byte widths — the only ones the platform writer emits — read
+   * through fixed-width `DataView` accessors instead of a byte loop because
+   * this runs for every offset-table entry and object reference; odd widths
+   * (a 3-byte offset size is legal) keep the loop.
    */
   private readBigEndianUint(offset: number, size: number): number {
     this.requireBytes(offset, size);
-    let value = 0;
-    for (let i = 0; i < size; i++) {
-      value = value * 256 + this.view.getUint8(offset + i);
+    return this.readUintUnchecked(offset, size);
+  }
+
+  /**
+   * {@link readBigEndianUint} without the bounds check, for callers whose
+   * span was already validated (the offset table in {@link parse}, container
+   * reference lists in {@link parseArray} and {@link parseDict}).
+   */
+  private readUintUnchecked(offset: number, size: number): number {
+    switch (size) {
+      case 1:
+        return this.view.getUint8(offset);
+      case 2:
+        return this.view.getUint16(offset);
+      case 4:
+        return this.view.getUint32(offset);
+      case 8:
+        return this.view.getUint32(offset) * 0x1_0000_0000 + this.view.getUint32(offset + 4);
+      default: {
+        let value = 0;
+        for (let i = 0; i < size; i++) {
+          value = value * 256 + this.view.getUint8(offset + i);
+        }
+        return value;
+      }
     }
-    return value;
   }
 
   /** Reads a single bounds-checked byte. */
