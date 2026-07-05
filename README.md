@@ -3,7 +3,7 @@
 [![CI](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml/badge.svg)](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/rork-plist)](https://www.npmjs.com/package/rork-plist)
 
-Zero-dependency Apple property list (plist) parser and builder for JavaScript, built to behave identically in every runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native. Parses both XML and binary (`bplist00`) plists; builds XML.
+Zero-dependency Apple plist parser and builder for any JavaScript runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
 
 ```ts
 import { parsePlist, buildPlist } from "rork-plist";
@@ -116,7 +116,7 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 
 ## Behavior notes
 
-Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents — XML and binary — against the platform plist utility on macOS.
+Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS.
 
 - **Binary plists** (`bplist00`) are parse-only; building always emits XML, which every Apple parser reads. `parsePlist` auto-detects binary vs. XML from a buffer, or use `parseBinaryPlist` directly. UID objects (used by keyed archives, not plain property lists) are rejected; sets are read as arrays, matching how the platform tooling widens them.
 
