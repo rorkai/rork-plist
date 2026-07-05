@@ -3,7 +3,7 @@
 [![CI](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml/badge.svg)](https://github.com/rorkai/rork-plist/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/rork-plist)](https://www.npmjs.com/package/rork-plist)
 
-Zero-dependency Apple plist parser and builder for any JavaScript runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
+The [fastest](#performance) zero-dependency Apple plist parser and builder for any JavaScript runtime: browsers, Node.js, Bun, Electron, Cloudflare Workers, and React Native.
 
 ```ts
 import { readFile } from "node:fs/promises";
