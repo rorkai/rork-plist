@@ -182,14 +182,14 @@ Binary reads beat XML reads because object lengths are explicit — nothing is s
 
 ```sh
 pnpm install
-pnpm test         # vitest, including plutil cross-validation on macOS
-pnpm typecheck    # tsc --noEmit
-pnpm lint         # oxlint
-pnpm format       # oxfmt
-pnpm checks       # format check + lint + typecheck + test
-pnpm bench        # vitest bench
+pnpm test          # vitest, including plutil cross-validation on macOS
+pnpm typecheck     # tsc --noEmit
+pnpm lint          # oxlint
+pnpm format        # oxfmt
+pnpm checks        # format check + lint + typecheck + test
+pnpm bench         # vitest bench
 pnpm bench:compare # cross-library comparison (see Performance)
-pnpm build        # tsdown → dist/
+pnpm build         # tsdown → dist/
 ```
 
 The layout follows the usual conventions: the public API lives in `src/` with
