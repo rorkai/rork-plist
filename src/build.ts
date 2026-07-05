@@ -6,10 +6,10 @@
  * column zero, one indentation unit per nesting level — so generated
  * documents diff cleanly against Apple tool output. Empty-element forms
  * follow what the reference parser accepts, which is not uniform across
- * elements: `<dict/>` and `<array/>` are fine, but empty data must be
+ * elements — `<dict/>` and `<array/>` are fine, but empty data must be
  * written open-close because the reference parser rejects `<data/>`.
  *
- * Serialization is strict where silence would hide bugs: values with no
+ * Serialization is strict where silence would hide bugs. Values with no
  * property list representation raise {@link PlistBuildError} carrying the
  * path of the offending value instead of being skipped or coerced. The one
  * deliberate omission mirrors `JSON.stringify` — a dictionary key whose
@@ -52,7 +52,7 @@ export interface BuildPlistOptions {
 }
 
 /**
- * The document prolog every emitted plist starts with: the XML declaration
+ * The document prolog every emitted plist starts with — the XML declaration
  * and the PropertyList-1.0 DOCTYPE, exactly as the reference writer emits
  * them.
  */
@@ -72,7 +72,7 @@ const XML_HEADER =
  * conditionally-assigned fields need no manual stripping. `undefined`
  * anywhere else — the root value or an array element — has no representation
  * and is rejected, because dropping an array element would silently shift
- * every following index. `null` is always rejected: the property list format
+ * every following index. `null` is always rejected — the property list format
  * has no null, and unlike `undefined` a literal `null` signals intent that
  * silent omission would erase.
  *
@@ -163,7 +163,7 @@ class Builder {
   /**
    * Serializes a `number` as `<integer>` when integral, `<real>` otherwise.
    *
-   * `NaN` and infinities are rejected: the XML format has spellings for
+   * `NaN` and infinities are rejected. The XML format has spellings for
    * them, but emitting one is almost always a caller bug in the protocols
    * this library serves, so the builder fails loudly instead of
    * round-tripping an accident.
@@ -171,8 +171,14 @@ class Builder {
   private appendNumber(value: number, path: string, depth: number): void {
     if (Number.isInteger(value)) {
       // Negative zero normalizes to zero; the two are indistinguishable
-      // after a parse round trip anyway.
-      this.appendLine(depth, `<integer>${value === 0 ? 0 : value}</integer>`);
+      // after a parse round trip anyway. Serialize through bigint so the
+      // 64-bit range check runs and the digits never render in exponential
+      // notation (`1e21` etc.), which the <integer> grammar cannot carry.
+      const integer = BigInt(value === 0 ? 0 : value);
+      if (integer < PLIST_INTEGER_MIN || integer > PLIST_INTEGER_MAX) {
+        throw new PlistBuildError(`integer ${value} overflows the 64-bit <integer> range`, path);
+      }
+      this.appendLine(depth, `<integer>${integer}</integer>`);
       return;
     }
     if (!Number.isFinite(value)) {
@@ -182,7 +188,7 @@ class Builder {
   }
 
   /**
-   * Serializes object-typed values: dates, binary data, arrays, and
+   * Serializes object-typed values — dates, binary data, arrays, and
    * dictionaries. Anything else object-shaped (class instances, Maps,
    * Sets) has no property list representation and is rejected.
    */
@@ -282,8 +288,8 @@ class Builder {
    *
    * Encodes exactly the view's window, never its whole backing buffer, so
    * subarray views into larger protocol buffers serialize correctly. The
-   * open-close form for empty data is load-bearing: the reference parser
-   * accepts `<data></data>` but rejects `<data/>`.
+   * open-close form for empty data is load-bearing because the reference
+   * parser accepts `<data></data>` but rejects `<data/>`.
    */
   private appendData(value: ArrayBufferView, depth: number): void {
     const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
@@ -321,7 +327,7 @@ class Builder {
 }
 
 /**
- * Matches every code unit the escape loop has to inspect: characters that
+ * Matches every code unit the escape loop has to inspect — characters that
  * need replacing (`&`, `<`, `>`, carriage return), characters that must be
  * rejected (C0 controls other than tab and line feed), and surrogates.
  *

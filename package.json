@@ -1,6 +1,6 @@
 {
   "name": "rork-plist",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Zero-dependency Apple property list (plist) parser and builder that runs identically in every JavaScript runtime",
   "keywords": [
     "apple",
@@ -45,14 +45,19 @@
     "format:check": "oxfmt --check .",
     "checks": "pnpm build && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "bench": "pnpm build && vitest bench --run",
+    "bench:compare": "pnpm build && node bench/compare.mjs",
     "prepublishOnly": "pnpm checks"
   },
   "devDependencies": {
+    "@expo/plist": "^0.8.0",
     "@types/node": "^20.19.43",
+    "bplist-creator": "0.1.1",
+    "bplist-parser": "0.3.2",
     "eslint": "8.57.1",
     "eslint-plugin-perfectionist": "5.9.1",
     "oxfmt": "0.57.0",
     "oxlint": "1.72.0",
+    "plist": "5.0.0",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

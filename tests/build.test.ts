@@ -57,7 +57,7 @@ test("emits the empty-element forms the reference parser accepts", () => {
     { indent: false },
   );
 
-  // <data></data> is load-bearing: the reference parser rejects <data/>.
+  // <data></data> is load-bearing because the reference parser rejects <data/>.
   expect(xml).toContain("<dict/>");
   expect(xml).toContain("<array/>");
   expect(xml).toContain("<string></string>");
@@ -97,6 +97,13 @@ describe("numbers", () => {
   test("rejects bigints outside the 64-bit range", () => {
     expect(() => buildPlist(18446744073709551616n)).toThrow(PlistBuildError);
     expect(() => buildPlist(-9223372036854775809n)).toThrow(PlistBuildError);
+  });
+
+  test("rejects integral numbers outside the 64-bit range", () => {
+    // Integer-valued doubles skip the bigint path but must not silently emit
+    // exponential notation (`1e+40`) that the <integer> grammar cannot carry.
+    expect(() => buildPlist(1e40)).toThrow(PlistBuildError);
+    expect(() => buildPlist(-1e19)).toThrow(PlistBuildError);
   });
 
   test("rejects NaN and infinities", () => {

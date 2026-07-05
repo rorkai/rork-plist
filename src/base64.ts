@@ -3,7 +3,7 @@
  *
  * The codec is exported as part of the public API because protocol code that
  * works with property lists almost always needs a base64 codec with the same
- * tolerance rules: whitespace anywhere (Apple tools wrap `<data>` content
+ * tolerance rules — whitespace anywhere (Apple tools wrap `<data>` content
  * across indented lines) and optional padding, but nothing else.
  *
  * Hosts that expose a native codec through the `Buffer` global (Node.js,
@@ -91,6 +91,23 @@ function describeInvalidBase64(stripped: string): RangeError {
 }
 
 /**
+ * Returns how many bytes a trailing partial group of base64 symbols carries.
+ * Two symbols hold one byte and three hold two; a remainder of zero means the
+ * input divided into full groups. A remainder of one was already rejected as
+ * truncated input before this runs.
+ */
+function trailingByteCount(remainder: number): number {
+  switch (remainder) {
+    case 2:
+      return 1;
+    case 3:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Returns the six-bit value of one validated alphabet symbol.
  *
  * Input reaching this function has already passed the shape check, so a
@@ -135,13 +152,13 @@ export function decodeBase64(text: string): Uint8Array {
 
   const symbolCount = stripped.length - padCount;
   const remainder = symbolCount % 4;
-  // A single trailing symbol carries six bits: not enough for a byte, so the
+  // A single trailing symbol carries six bits, not enough for a byte, so the
   // group is truncated rather than merely unpadded.
   if (remainder === 1) {
     throw new RangeError("base64 input is truncated");
   }
 
-  const byteLength = Math.floor(symbolCount / 4) * 3 + (remainder === 2 ? 1 : remainder === 3 ? 2 : 0);
+  const byteLength = Math.floor(symbolCount / 4) * 3 + trailingByteCount(remainder);
 
   const buffer = nativeBuffer();
   if (buffer) {
@@ -208,14 +225,19 @@ export function encodeBase64(bytes: Uint8Array): string {
     }
   }
 
-  if (bitsCollected === 8) {
-    out += ALPHABET.charAt((accumulator >>> 2) & 63) + ALPHABET.charAt((accumulator << 4) & 63) + "==";
-  } else if (bitsCollected === 16) {
-    out +=
-      ALPHABET.charAt((accumulator >>> 10) & 63) +
-      ALPHABET.charAt((accumulator >>> 4) & 63) +
-      ALPHABET.charAt((accumulator << 2) & 63) +
-      "=";
+  // One leftover byte flushes as two symbols, two bytes as three; zero
+  // leftover bits mean the input divided into full three-byte groups.
+  switch (bitsCollected) {
+    case 8:
+      out += ALPHABET.charAt((accumulator >>> 2) & 63) + ALPHABET.charAt((accumulator << 4) & 63) + "==";
+      break;
+    case 16:
+      out +=
+        ALPHABET.charAt((accumulator >>> 10) & 63) +
+        ALPHABET.charAt((accumulator >>> 4) & 63) +
+        ALPHABET.charAt((accumulator << 2) & 63) +
+        "=";
+      break;
   }
 
   return out;

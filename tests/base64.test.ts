@@ -51,7 +51,7 @@ test("rejects excessive padding", () => {
 // code path; it must behave identically to the native fast path.
 describe("without a native base64 codec", () => {
   beforeEach(() => {
-    // `undefined` is the point here: it simulates a host without the global.
+    // The `undefined` is the point here — it simulates a host without the global.
     // oxlint-disable-next-line unicorn/no-useless-undefined
     vi.stubGlobal("Buffer", undefined);
   });

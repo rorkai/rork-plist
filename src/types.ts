@@ -35,7 +35,7 @@
 export type PlistValue = string | number | bigint | boolean | Date | Uint8Array | PlistArray | PlistDictionary;
 
 /**
- * An `<array>` element: an ordered list of property list values.
+ * An `<array>` element — an ordered list of property list values.
  *
  * This is a plain JavaScript array; the interface exists only to give the
  * recursive {@link PlistValue} type a name.
@@ -43,7 +43,7 @@ export type PlistValue = string | number | bigint | boolean | Date | Uint8Array 
 export interface PlistArray extends Array<PlistValue> {}
 
 /**
- * A `<dict>` element: a plain object whose keys appear in document order.
+ * A `<dict>` element — a plain object whose keys appear in document order.
  *
  * Duplicate keys in a parsed document resolve to the last occurrence,
  * matching the reference parser. A literal `__proto__` key is always stored
