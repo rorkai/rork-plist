@@ -34,8 +34,10 @@ jobs:
         env:
           TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
-          package_version="v$(node -p "require('./package.json').version")"
-          if [ "$package_version" != "$TAG_NAME" ]; then
+          package_version="$(node -p "require('./package.json').version")"
+          # Accept a bare tag (0.1.1) or a legacy v-prefixed one (v0.1.1).
+          tag="${TAG_NAME#v}"
+          if [ "$package_version" != "$tag" ]; then
             echo "package.json is $package_version but the release tag is $TAG_NAME" >&2
             exit 1
           fi

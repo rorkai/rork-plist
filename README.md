@@ -161,7 +161,7 @@ include the plutil cross-validation suite.
 Releases publish to npm from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements) via [trusted publishing](https://docs.npmjs.com/trusted-publishers) — no long-lived tokens are stored in the repository.
 
 1. Bump `version` in `package.json` and merge to `main`.
-2. Create a GitHub release with a `vX.Y.Z` tag matching the new version.
+2. Create a GitHub release with an `X.Y.Z` tag matching the new version.
 3. The release workflow verifies the tag, runs the full gate (including
    plutil cross-validation on the macOS runner), and publishes.
 
