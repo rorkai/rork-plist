@@ -31,10 +31,20 @@ import {
   buildBinary as plistBuildBinary,
   parse as plistParse,
   parseBinary as plistParseBinary,
+  parseOpenStep as plistParseOpenStep,
   type PlistValue as PlistPackageValue,
 } from "plist";
 
-import { buildBinaryPlist, buildPlist, parseBinaryPlist, parsePlist, type PlistValue } from "../dist/index.js";
+import {
+  buildBinaryPlist,
+  buildOpenStepPlist,
+  buildPlist,
+  parseBinaryPlist,
+  parseOpenStepPlist,
+  parsePlist,
+  type PlistValue,
+} from "../dist/index.js";
+import { shapes, stringifyLeaves } from "./fixtures.ts";
 
 // The remaining three libraries are CommonJS without usable ESM-facing types
 // (@expo/plist ships declarations that miss its double-wrapped default
@@ -54,48 +64,12 @@ const bplistParser = require("bplist-parser") as {
 
 const bplistCreator = require("bplist-creator") as (value: unknown) => Buffer;
 
-/** Deterministic pseudo-random bytes, as a Buffer so every library accepts them. */
-function bytes(length: number, seed: number): Buffer {
-  const out = Buffer.alloc(length);
-  let state = seed;
-  for (let i = 0; i < length; i++) {
-    state = (state * 1664525 + 1013904223) >>> 0;
-    out[i] = state & 0xff;
-  }
-  return out;
-}
-
-const shapes: Record<string, PlistValue> = {
-  "auth response": {
-    Status: { ec: 0, ed: "Success", "server-info": "1.0" },
-    spd: bytes(512, 1),
-    np: "8874100170514355861",
-    "session-token": bytes(256, 2),
-    created: new Date("2026-07-04T10:20:30Z"),
-  },
-  "device list": {
-    devices: Array.from({ length: 500 }, (_, i) => ({
-      deviceId: `DEVICE${i.toString(16).toUpperCase().padStart(8, "0")}`,
-      name: `Device ${i} & Co <primary>`,
-      deviceNumber: `00008150-${i.toString(16).padStart(12, "0")}`,
-      model: "iPhone17,1",
-      enabled: i % 3 !== 0,
-      addedDate: new Date(1_700_000_000_000 + i * 86_400_000),
-    })),
-  },
-  "profile (data-heavy)": {
-    AppIDName: "Development Profile",
-    ExpirationDate: new Date("2027-07-04T00:00:00Z"),
-    DeveloperCertificates: [bytes(1600, 3), bytes(1600, 4), bytes(1600, 5)],
-    "der-encoded-profile": bytes(500_000, 6),
-    TimeToLive: 365,
-    Version: 1,
-  },
-};
-
-/** One document shape with its canonical XML and binary encodings. */
+/** One document shape with its canonical XML, binary, and OpenStep encodings. */
 interface Fixture {
   binary: Uint8Array;
+  openStep: string;
+  /** The shape rewritten into OpenStep's untyped value model. */
+  openStepValue: PlistValue;
   value: PlistValue;
   xml: string;
 }
@@ -108,12 +82,16 @@ function makeFixtures(): Record<string, Fixture> {
     try {
       for (const [name, value] of Object.entries(shapes)) {
         const path = join(dir, "doc.plist");
+        const openStepValue = stringifyLeaves(value);
+        const openStep = buildOpenStepPlist(openStepValue);
+        writeFileSync(path, openStep);
+        execFileSync("plutil", ["-lint", path]);
         writeFileSync(path, buildPlist(value));
         execFileSync("plutil", ["-convert", "binary1", path]);
         const binary = new Uint8Array(readFileSync(path));
         execFileSync("plutil", ["-convert", "xml1", path]);
         const xml = readFileSync(path, "utf8");
-        fixtures[name] = { binary, value, xml };
+        fixtures[name] = { binary, openStep, openStepValue, value, xml };
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -121,7 +99,14 @@ function makeFixtures(): Record<string, Fixture> {
   } else {
     console.log("plutil is unavailable off macOS; fixtures use this library's writers\n");
     for (const [name, value] of Object.entries(shapes)) {
-      fixtures[name] = { binary: buildBinaryPlist(value), value, xml: buildPlist(value) };
+      const openStepValue = stringifyLeaves(value);
+      fixtures[name] = {
+        binary: buildBinaryPlist(value),
+        openStep: buildOpenStepPlist(openStepValue),
+        openStepValue,
+        value,
+        xml: buildPlist(value),
+      };
     }
   }
   return fixtures;
@@ -178,7 +163,7 @@ const fixtures = makeFixtures();
 /** Geometric-mean multiplier vs rork-plist per operation, printed at the end. */
 const summary = new Map<string, number[]>();
 
-for (const [name, { binary, value, xml }] of Object.entries(fixtures)) {
+for (const [name, { binary, openStep, openStepValue, value, xml }] of Object.entries(fixtures)) {
   const buf = Buffer.from(binary.buffer, binary.byteOffset, binary.byteLength);
   // The fixtures avoid the corners where the value models differ (no bigint,
   // and data payloads are Buffers), so one runtime value serves every library.
@@ -218,6 +203,16 @@ for (const [name, { binary, value, xml }] of Object.entries(fixtures)) {
         ["bplist-creator", () => bplistCreator(value)],
       ],
     ],
+    [
+      "parse OpenStep",
+      [
+        ["rork-plist", () => parseOpenStepPlist(openStep)],
+        ["plist", () => plistParseOpenStep(openStep)],
+      ],
+    ],
+    // No package on npm writes OpenStep (the platform tooling cannot
+    // either), so this operation times rork-plist alone.
+    ["build OpenStep", [["rork-plist", () => buildOpenStepPlist(openStepValue)]]],
   ];
 
   console.log(

@@ -247,9 +247,11 @@ describe("structure errors", () => {
     expect(() => parsePlist("<!-- unterminated")).toThrow(PlistParseError);
   });
 
-  test("rejects an empty document", () => {
+  test("rejects an empty document; whitespace alone is an OpenStep empty dict", () => {
     expect(() => parsePlist("")).toThrow(PlistParseError);
-    expect(() => parsePlist("   \n  ")).toThrow(PlistParseError);
+    // Whitespace-only input has no markup, so it takes the OpenStep path,
+    // where the reference parser reads an entry-less strings file.
+    expect(parsePlist("   \n  ")).toEqual({});
   });
 });
 

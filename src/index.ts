@@ -17,9 +17,11 @@
 
 export { decodeBase64, encodeBase64 } from "./base64";
 export { buildBinaryPlist } from "./build-binary";
+export { buildOpenStepPlist, type BuildOpenStepPlistOptions } from "./build-openstep";
 export { buildPlist, type BuildPlistOptions } from "./build";
 export { PlistBuildError, PlistParseError, type PlistErrorPosition } from "./errors";
 export { parsePlist } from "./parse";
 export { parseBinaryPlist } from "./parse-binary";
+export { parseOpenStepPlist } from "./parse-openstep";
 export type { ParsePlistOptions } from "./parse-options";
 export type { PlistArray, PlistDictionary, PlistValue } from "./types";
