@@ -3,7 +3,11 @@
   "compilerOptions": {
     // Benchmarks run on the development toolchain, not the library's ES2022
     // floor, so newer standard-library methods are available to them.
-    "lib": ["ES2023"]
+    "lib": ["ES2023"],
+    // compare.ts runs through Node's native type stripping, which resolves
+    // relative imports verbatim, so the shared fixtures import carries its
+    // real .ts extension.
+    "allowImportingTsExtensions": true
   },
   "include": ["."]
 }

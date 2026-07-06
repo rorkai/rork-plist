@@ -212,6 +212,29 @@ describe("the data option", () => {
   });
 });
 
+describe("depth limit", () => {
+  test("applies on container entry, empty containers included", () => {
+    // Object 0 is an array whose single element is object 1, an empty array.
+    // After the magic come the two objects, the offset table (objects at
+    // bytes 8 and 10), and the trailer naming offsetIntSize 1, objectRefSize
+    // 1, two objects, root object 0, and the offset table at byte 11.
+    // oxfmt-ignore
+    const nestedEmpty = Uint8Array.from([
+      0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30,
+      0xa1, 0x01,
+      0xa0,
+      0x08, 0x0a,
+      0, 0, 0, 0, 0, 0, 1, 1,
+      0, 0, 0, 0, 0, 0, 0, 2,
+      0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 11,
+    ]);
+
+    expect(parseBinaryPlist(nestedEmpty, { maxDepth: 2 })).toEqual([[]]);
+    expect(() => parseBinaryPlist(nestedEmpty, { maxDepth: 1 })).toThrow(/maximum nesting depth/u);
+  });
+});
+
 describe("shared object references", () => {
   test("resolves repeated references to one shared value without expanding", () => {
     // Height 60 is 2^60 leaf visits without memoization — the test would not

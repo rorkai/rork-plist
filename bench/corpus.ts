@@ -114,11 +114,11 @@ function classifySuccess(bytes: Uint8Array, isBinary: boolean): Outcome {
     return "binary";
   }
   const prefix =
-    new TextDecoder("utf-16le").decode(bytes.subarray(0, 2)) === "\ufeff"
+    new TextDecoder("utf-16le").decode(bytes.subarray(0, 2)) === "\uFEFF"
       ? new TextDecoder("utf-16le").decode(bytes.subarray(0, 256))
       : new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 256));
   return prefix
-    .replace(/^\ufeff/u, "")
+    .replace(/^\uFEFF/u, "")
     .trimStart()
     .startsWith("<")
     ? "xml"

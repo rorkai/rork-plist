@@ -43,12 +43,12 @@ describe("strings", () => {
     expect(buildOpenStepPlist("a\\b")).toBe('"a\\\\b"\n');
     expect(buildOpenStepPlist("a\nb\tc\rd")).toBe('"a\\nb\\tc\\rd"\n');
     expect(buildOpenStepPlist("\u0007")).toBe('"\\007"\n');
-    expect(buildOpenStepPlist("\u007f")).toBe('"\\177"\n');
+    expect(buildOpenStepPlist("\u007F")).toBe('"\\177"\n');
   });
 
   test("spells lone surrogates as \\U escapes and keeps pairs literal", () => {
-    expect(buildOpenStepPlist("\ud83d")).toBe('"\\Ud83d"\n');
-    expect(buildOpenStepPlist("\ud83d\ude00")).toBe('"\ud83d\ude00"\n');
+    expect(buildOpenStepPlist("\uD83D")).toBe('"\\Ud83d"\n');
+    expect(buildOpenStepPlist("\uD83D\uDE00")).toBe('"\uD83D\uDE00"\n');
   });
 });
 
@@ -132,7 +132,7 @@ describe("round trips", () => {
       return state / 0x1_0000_0000;
     };
     const randomString = () => {
-      const alphabet = 'ab z09$/:.-="\\\n\t\u0007\u00e9\ud83d\ude00';
+      const alphabet = 'ab z09$/:.-="\\\n\t\u0007\u00E9\uD83D\uDE00';
       let out = "";
       for (let i = 0, n = Math.floor(random() * 10); i < n; i++) {
         out += alphabet[Math.floor(random() * alphabet.length)];
@@ -175,7 +175,7 @@ describe.runIf(process.platform === "darwin")("plutil cross-validation", () => {
       const value: PlistValue = {
         name: 'quote " backslash \\ tab\t',
         bell: "\u0007",
-        loneSurrogate: "\ud83d",
+        loneSurrogate: "\uD83D",
         emoji: "café 😀",
         blob: new Uint8Array([0, 1, 2, 253, 254, 255]),
         list: ["bare", "needs quoting", ["nested"], new Uint8Array([9])],

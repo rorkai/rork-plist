@@ -229,9 +229,6 @@ class BinaryParser {
     if (cached !== undefined) {
       return cached;
     }
-    if (depth > this.maxDepth) {
-      this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`, this.objectOffset(index));
-    }
 
     const offset = this.objectOffset(index);
     // objectOffset guarantees the offset lies inside the object region, so
@@ -279,9 +276,11 @@ class BinaryParser {
       // references — and the platform tooling widens sets to arrays in XML too.
       case 0xa:
       case 0xc:
+        this.requireDepth(depth + 1, offset);
         value = this.parseArray(offset, objectInfo, depth + 1);
         break;
       case 0xd:
+        this.requireDepth(depth + 1, offset);
         value = this.parseDict(offset, objectInfo, depth + 1);
         break;
       default:
@@ -290,6 +289,17 @@ class BinaryParser {
 
     this.resolved[index] = value;
     return value;
+  }
+
+  /**
+   * Fails when entering a container would exceed the depth limit. Enforced
+   * at container entry — empty containers included — matching the XML
+   * parser; this is also what stops reference cycles from recursing forever.
+   */
+  private requireDepth(depth: number, offset: number): void {
+    if (depth > this.maxDepth) {
+      this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`, offset);
+    }
   }
 
   /**

@@ -87,6 +87,17 @@ function isOpenStepWhitespace(code: number): boolean {
 }
 
 /**
+ * Reports whether a code unit may separate hex groups inside a data literal.
+ * The reference parser is narrower here than between tokens: space, tab,
+ * line feed, and carriage return separate groups, while vertical tab and
+ * form feed — legal token separators elsewhere — are rejected inside data,
+ * verified against plutil.
+ */
+function isDataWhitespace(code: number): boolean {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+}
+
+/**
  * Reports whether a code unit may appear in a bare (unquoted) string. The
  * alphabet is exactly the reference parser's: ASCII letters and digits plus
  * `_`, `$`, `/`, `:`, `.`, and `-`. Everything else — including non-ASCII —
@@ -170,7 +181,9 @@ class OpenStepParser {
 
     const code = this.src.charCodeAt(this.pos);
     if (typeof first === "string" && (code === 0x3d || code === 0x3b)) {
-      // '=' or ';' after a root string is a strings-file document.
+      // '=' or ';' after a root string is a strings-file document — an
+      // implicit root dictionary, entered like an explicit one.
+      this.requireDepth(1);
       this.pos = start;
       return this.parseDictionaryBody(1, false);
     }
@@ -179,18 +192,19 @@ class OpenStepParser {
 
   /**
    * Parses one value at the current position, dispatched on its first
-   * character.
+   * character. The depth limit is enforced when a container is entered, so
+   * an empty container beyond the limit fails like a populated one — the
+   * same semantics as the XML parser.
    */
   private parseValue(depth: number): PlistValue {
-    if (depth > this.maxDepth) {
-      this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`);
-    }
     const code = this.src.charCodeAt(this.pos);
     switch (code) {
       case 0x7b: // {
+        this.requireDepth(depth + 1);
         this.pos++;
         return this.parseDictionaryBody(depth + 1, true);
       case 0x28: // (
+        this.requireDepth(depth + 1);
         this.pos++;
         return this.parseArrayBody(depth + 1);
       case 0x3c: // <
@@ -200,6 +214,13 @@ class OpenStepParser {
         return this.parseQuotedString(code);
       default:
         return this.parseBareString();
+    }
+  }
+
+  /** Fails when entering a container would exceed the depth limit. */
+  private requireDepth(depth: number): void {
+    if (depth > this.maxDepth) {
+      this.fail(`maximum nesting depth of ${this.maxDepth} exceeded`);
     }
   }
 
@@ -294,8 +315,9 @@ class OpenStepParser {
   }
 
   /**
-   * Parses a `<hex bytes>` data literal. Whitespace separates byte groups,
-   * each group must hold an even number of hex digits, and comments are not
+   * Parses a `<hex bytes>` data literal. Space, tab, line feed, and carriage
+   * return separate byte groups (a narrower set than between tokens), each
+   * group must hold an even number of hex digits, and comments are not
    * recognized inside the literal — all verified against the reference
    * parser.
    */
@@ -305,7 +327,7 @@ class OpenStepParser {
     const src = this.src;
     const bytes: number[] = [];
     for (;;) {
-      while (this.pos < src.length && isOpenStepWhitespace(src.charCodeAt(this.pos))) {
+      while (this.pos < src.length && isDataWhitespace(src.charCodeAt(this.pos))) {
         this.pos++;
       }
       if (this.pos >= src.length) {

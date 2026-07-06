@@ -99,6 +99,15 @@ describe("data", () => {
     expect(() => parseOpenStepPlist("<01")).toThrow(PlistParseError);
     expect(() => parseOpenStepPlist("<01 /*x*/ 02>")).toThrow(PlistParseError);
   });
+
+  test("separates groups with the reference parser's data whitespace only", () => {
+    // Between tokens, vertical tab and form feed are legal separators; inside
+    // a data literal the reference parser rejects them.
+    expect(parseOpenStepPlist("<01\t02\r\n03>")).toEqual(new Uint8Array([1, 2, 3]));
+    expect(() => parseOpenStepPlist("<01\u000b02>")).toThrow(PlistParseError);
+    expect(() => parseOpenStepPlist("<01\f02>")).toThrow(PlistParseError);
+    expect(parseOpenStepPlist("{ a =\f<0102>; }")).toEqual({ a: new Uint8Array([1, 2]) });
+  });
 });
 
 describe("strings and escapes", () => {
@@ -125,8 +134,8 @@ describe("strings and escapes", () => {
     expect(parseOpenStepPlist('"\\7"')).toBe("\u0007");
     expect(parseOpenStepPlist('"\\1019"')).toBe("A9");
     // 0xE1 in the NeXTSTEP character set is Æ, not Latin-1 á.
-    expect(parseOpenStepPlist('"\\341"')).toBe("\u00c6");
-    expect(parseOpenStepPlist('"\\200"')).toBe("\u00a0");
+    expect(parseOpenStepPlist('"\\341"')).toBe("\u00C6");
+    expect(parseOpenStepPlist('"\\200"')).toBe("\u00A0");
     // Values beyond three octal digits' byte range wrap to a byte first.
     expect(parseOpenStepPlist('"\\501"')).toBe("A");
   });
@@ -136,7 +145,7 @@ describe("strings and escapes", () => {
     expect(parseOpenStepPlist('"\\U41"')).toBe("A");
     expect(parseOpenStepPlist('"\\U00419"')).toBe("A9");
     expect(parseOpenStepPlist('"\\Ud83d\\Ude00"')).toBe("😀");
-    expect(parseOpenStepPlist('"\\Ud83d"')).toBe("\ud83d");
+    expect(parseOpenStepPlist('"\\Ud83d"')).toBe("\uD83D");
     expect(parseOpenStepPlist('"\\U"')).toBe("\u0000");
     // Lowercase \u is not a Unicode escape; the u stands for itself.
     expect(parseOpenStepPlist('"\\u0041"')).toBe("u0041");
@@ -181,7 +190,7 @@ describe("comments and layout", () => {
 
   test("accepts CR, CRLF, and a leading byte order mark", () => {
     expect(parseOpenStepPlist("{ a = 1;\r b = 2;\r }")).toEqual({ a: "1", b: "2" });
-    expect(parseOpenStepPlist("\ufeff{ a = 1; }")).toEqual({ a: "1" });
+    expect(parseOpenStepPlist("\uFEFF{ a = 1; }")).toEqual({ a: "1" });
   });
 
   test("rejects content after the root value", () => {
@@ -190,8 +199,13 @@ describe("comments and layout", () => {
     expect(() => parseOpenStepPlist('"a" "b"')).toThrow(PlistParseError);
   });
 
-  test("enforces the nesting depth limit", () => {
+  test("enforces the nesting depth limit, empty containers included", () => {
     expect(() => parseOpenStepPlist("((((x))))", { maxDepth: 2 })).toThrow(/maximum nesting depth/u);
+    // The limit applies on container entry, so an empty container one level
+    // past the limit fails exactly like a populated one.
+    expect(() => parseOpenStepPlist("({};)", { maxDepth: 1 })).toThrow(/maximum nesting depth/u);
+    expect(() => parseOpenStepPlist("(())", { maxDepth: 1 })).toThrow(/maximum nesting depth/u);
+    expect(parseOpenStepPlist("(())", { maxDepth: 2 })).toEqual([[]]);
   });
 
   test("rejects GNUstep typed values, like the reference parser", () => {
