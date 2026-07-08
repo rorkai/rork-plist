@@ -33,7 +33,7 @@ test("decodes identically on both sides of the small-input fast path", () => {
   for (let length = 0; length <= 80; length++) {
     const bytes = new Uint8Array(length).map((_, i) => (i * 53 + length) & 0xff);
     const base64 = encodeBase64(bytes);
-    const wrapped = `\n\t${base64.replace(/(.{20})/gu, "$1\n\t")}\n`;
+    const wrapped = `\n\t${base64.replaceAll(/(.{20})/gu, "$1\n\t")}\n`;
     const unpadded = base64.replace(/=+$/u, "");
 
     expect(decodeBase64(base64), `bare, ${length} bytes`).toEqual(bytes);
