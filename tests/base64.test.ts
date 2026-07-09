@@ -26,10 +26,7 @@ test("ignores whitespace anywhere in the input", () => {
   expect(decodeBase64(" Zm9v\n\tYmFy \r\n")).toEqual(decodeBase64("Zm9vYmFy"));
 });
 
-// The whitespace set is ASCII whitespace: the platform parser accepts a form
-// feed inside <data> (probed through plutil), and so does the standard
-// Uint8Array.fromBase64 codec. A vertical tab is not whitespace to either
-// codec and stays rejected.
+// plutil and Uint8Array.fromBase64 both treat \f as whitespace, but not \v.
 test("accepts a form feed as whitespace but rejects a vertical tab", () => {
   expect(decodeBase64("Zm9v\fYmFy")).toEqual(decodeBase64("Zm9vYmFy"));
   expect(decodeBase64(`\f${"Zm9vYmFy".repeat(12)}\f`)).toEqual(decodeBase64("Zm9vYmFy".repeat(12)));
@@ -74,13 +71,10 @@ test("rejects excessive padding", () => {
   expect(() => decodeBase64("Z===")).toThrow(RangeError);
 });
 
-// The decode tier backed by the standard Uint8Array codec must accept and
-// reject exactly the same inputs as this module's own paths — a divergence
-// would make behavior depend on the host. The standard API is removed for
-// the duration of the block so decodeBase64 exercises the module's own
-// validation, while the saved reference serves as the comparison oracle.
-// Hosts without the API skip the block (stock Node 24 ships it only behind
-// a V8 flag; the CI matrix includes a run with the flag enabled).
+// decodeBase64 must behave the same with and without the standard codec.
+// The block removes the API so our own paths run, and keeps the saved
+// reference as the oracle. Hosts without the API skip the block; CI covers
+// it with V8's --js-base-64 flag.
 const standardCodec = Object.getOwnPropertyDescriptor(Uint8Array, "fromBase64");
 
 describe.skipIf(standardCodec === undefined)("differential against the standard codec", () => {
@@ -179,8 +173,7 @@ describe("without a native base64 codec", () => {
       Object.defineProperty(Uint8Array, "fromBase64", fromBase64);
     }
     if (toBase64) {
-      // Restores the descriptor the beforeEach hook removed; this puts the
-      // host's own method back rather than extending the prototype.
+      // Not an extension — restoring the host's own descriptor.
       // oxlint-disable-next-line no-extend-native
       Object.defineProperty(Uint8Array.prototype, "toBase64", toBase64);
     }

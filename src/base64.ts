@@ -6,13 +6,10 @@
  * tolerance rules — whitespace anywhere (Apple tools wrap `<data>` content
  * across indented lines) and optional padding, but nothing else.
  *
- * Inputs longer than the small-input fast path decode through the first
- * native codec the host provides: the standard `Uint8Array.fromBase64` where
- * it has shipped, then the `Buffer` global (Node.js, Bun, Electron, edge
- * runtimes with Node compatibility), then a portable pure-JavaScript path.
- * Every tier has identical observable behavior; rejected input always
- * reports through this module's own validation, so error types and messages
- * do not vary by host.
+ * Decoding uses the fastest codec the host ships — the standard
+ * `Uint8Array.fromBase64`, then the `Buffer` global, then plain
+ * JavaScript — and behaves identically on all of them. Errors always come
+ * from this module's own validation, never from the host codec.
  *
  * @module
  */
