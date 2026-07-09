@@ -229,15 +229,15 @@ describe("keyed-archive UIDs", () => {
   // when reading this shape. Both silently corrupt the index, so anything
   // non-canonical stays an ordinary dictionary.
   test("leaves non-canonical CF$UID dictionaries as dictionaries", () => {
-    expect(parsePlist("<dict><key>CF$UID</key><integer>7</integer><key>x</key><string>y</string></dict>")).toEqual({
-      CF$UID: 7,
+    expect(parsePlist('<dict><key>CF$UID</key><integer>7</integer><key>x</key><string>y</string></dict>')).toEqual({
+      "CF$UID": 7,
       x: "y",
     });
-    expect(parsePlist("<dict><key>CF$UID</key><string>7</string></dict>")).toEqual({ CF$UID: "7" });
-    expect(parsePlist("<dict><key>CF$UID</key><real>7.5</real></dict>")).toEqual({ CF$UID: 7.5 });
-    expect(parsePlist("<dict><key>CF$UID</key><integer>-3</integer></dict>")).toEqual({ CF$UID: -3 });
+    expect(parsePlist("<dict><key>CF$UID</key><string>7</string></dict>")).toEqual({ "CF$UID": "7" });
+    expect(parsePlist("<dict><key>CF$UID</key><real>7.5</real></dict>")).toEqual({ "CF$UID": 7.5 });
+    expect(parsePlist("<dict><key>CF$UID</key><integer>-3</integer></dict>")).toEqual({ "CF$UID": -3 });
     expect(parsePlist("<dict><key>CF$UID</key><integer>8589934592</integer></dict>")).toEqual({
-      CF$UID: 8589934592,
+      "CF$UID": 8589934592,
     });
   });
 });

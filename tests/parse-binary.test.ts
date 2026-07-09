@@ -280,7 +280,7 @@ describe("UID objects", () => {
     // The root array plus one object each for 9 and 300 makes three objects,
     // where a writer without interning would emit four. numObjects is the
     // big-endian u64 that starts 24 bytes before the end of the trailer.
-    const view = new DataView(built.buffer, built.byteLength - 24, 8);
+    const view = new DataView(built.buffer, built.byteOffset + built.byteLength - 24, 8);
     expect(view.getUint32(4)).toBe(3);
   });
 });
