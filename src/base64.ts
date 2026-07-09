@@ -6,15 +6,15 @@
  * tolerance rules — whitespace anywhere (Apple tools wrap `<data>` content
  * across indented lines) and optional padding, but nothing else.
  *
- * Hosts that expose a native codec through the `Buffer` global (Node.js,
- * Bun, Electron, edge runtimes with Node compatibility) take a fast path
- * after validation; browsers and Hermes take a portable pure-JavaScript path
- * with identical observable behavior.
+ * Decoding uses the fastest codec the host ships — the standard
+ * `Uint8Array.fromBase64`, then the `Buffer` global, then plain
+ * JavaScript — and behaves identically on all of them. Errors always come
+ * from this module's own validation, never from the host codec.
  *
  * @module
  */
 
-import { EQUALS_SIGN, isWhitespaceCode } from "./internal/character-codes";
+import { EQUALS_SIGN, FORM_FEED, isWhitespaceCode } from "./internal/character-codes";
 
 /** The RFC 4648 section 4 alphabet, indexed by six-bit value. */
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -48,13 +48,25 @@ const SMALL_INPUT_MAX_LENGTH = 64;
 const SMALL_DECODE_SCRATCH = new Uint8Array((SMALL_INPUT_MAX_LENGTH / 4) * 3);
 
 /**
+ * Reports whether a code unit is base64 whitespace.
+ *
+ * The set is ASCII whitespace — the XML markup set plus the form feed —
+ * matching both the platform parser (probed through `plutil`, which accepts
+ * a form feed inside `<data>`) and the standard `Uint8Array.fromBase64`
+ * codec, so the native tier never accepts input the other tiers reject.
+ */
+function isBase64Whitespace(code: number): boolean {
+  return isWhitespaceCode(code) || code === FORM_FEED;
+}
+
+/**
  * Detects whether whitespace stripping is needed at all, so the common
  * single-line input avoids the `replace` allocation entirely.
  */
-const CONTAINS_WHITESPACE = /[\t\n\r ]/u;
+const CONTAINS_WHITESPACE = /[\t\n\f\r ]/u;
 
 /** Whitespace runs removed before validation and decoding. */
-const WHITESPACE_RUNS = /[\t\n\r ]+/gu;
+const WHITESPACE_RUNS = /[\t\n\f\r ]+/gu;
 
 /**
  * Alphabet symbols followed by at most two trailing padding characters; one
@@ -87,6 +99,36 @@ interface BufferConstructorLike {
 function nativeBuffer(): BufferConstructorLike | null {
   const candidate = (globalThis as { Buffer?: BufferConstructorLike }).Buffer;
   return candidate && typeof candidate.from === "function" ? candidate : null;
+}
+
+/**
+ * Returns the standard `Uint8Array.fromBase64` codec when the host ships it.
+ *
+ * The lookup happens at call time, like {@link nativeBuffer}, so tests can
+ * remove the API to pin a specific tier and hosts that gain the API pick it
+ * up without a rebuild. Its whitespace, padding, and rejection behavior was
+ * probed case by case against this module's rules; the one divergence —
+ * error type and wording — never surfaces because rejected input re-reports
+ * through this module's own validation.
+ *
+ * The access goes through a cast because the program's `lib` is pinned to
+ * the ES2022 runtime floor, where the standard codec's declarations do not
+ * exist. Typing the property as optional right here is the point: it is
+ * exactly as reliable as the feature detection.
+ */
+function nativeFromBase64(): ((text: string) => Uint8Array) | null {
+  const candidate = (Uint8Array as { fromBase64?: unknown }).fromBase64;
+  return typeof candidate === "function" ? (candidate as (text: string) => Uint8Array) : null;
+}
+
+/**
+ * Interface of the standard `Uint8Array.prototype.toBase64` method used by
+ * the encode fast path on hosts without `Buffer`. Declared locally for the
+ * same reason {@link nativeFromBase64} casts: the ES2022 `lib` floor has no
+ * declarations for the standard codec.
+ */
+interface ToBase64Capable {
+  toBase64?: () => string;
 }
 
 /**
@@ -170,7 +212,7 @@ function decodeSmallBase64(text: string): Uint8Array | null {
       padCount++;
       continue;
     }
-    if (isWhitespaceCode(code)) {
+    if (isBase64Whitespace(code)) {
       continue;
     }
     return null;
@@ -205,12 +247,13 @@ function symbolValue(code: number): number {
 /**
  * Decodes RFC 4648 base64 text into bytes.
  *
- * Whitespace is ignored anywhere, matching how Apple tools wrap `<data>`
- * content across lines. Padding may be omitted when the final group is
- * unambiguous. Characters outside the alphabet, misplaced padding, or a
- * truncated final group raise an error instead of silently dropping part of
- * the payload — the failure mode that matters when the payload is a
- * certificate, a cryptographic proof, or a session token.
+ * ASCII whitespace (space, tab, line feed, form feed, carriage return) is
+ * ignored anywhere, matching how Apple tools wrap `<data>` content across
+ * lines. Padding may be omitted when the final group is unambiguous.
+ * Characters outside the alphabet, misplaced padding, or a truncated final
+ * group raise an error instead of silently dropping part of the payload —
+ * the failure mode that matters when the payload is a certificate, a
+ * cryptographic proof, or a session token.
  *
  * @param text Base64 text, optionally wrapped with whitespace.
  * @returns A freshly allocated buffer holding exactly the decoded bytes.
@@ -221,6 +264,17 @@ export function decodeBase64(text: string): Uint8Array {
     const decoded = decodeSmallBase64(text);
     if (decoded !== null) {
       return decoded;
+    }
+  }
+
+  const fromBase64 = nativeFromBase64();
+  if (fromBase64) {
+    try {
+      return fromBase64(text);
+    } catch {
+      // The input is invalid; fall through to this module's validation so
+      // the rejection carries the canonical error type and message instead
+      // of the host's. The doubled scan only ever runs on the failure path.
     }
   }
 
@@ -278,6 +332,10 @@ export function decodeBase64(text: string): Uint8Array {
  * `<data>` content, and a single line keeps documents smaller and encoding
  * simpler than column-wrapped output.
  *
+ * Hosts without `Buffer` use the standard `Uint8Array.prototype.toBase64`
+ * when it has shipped — it produces the same padded, unwrapped output — and
+ * only hosts with neither codec take the portable path.
+ *
  * The portable path accumulates bits over `for...of` iteration, which types
  * every byte as `number` — index arithmetic the compiler cannot verify never
  * appears, so neither do non-null assertions. Six bits of a final partial
@@ -290,6 +348,11 @@ export function encodeBase64(bytes: Uint8Array): string {
   const buffer = nativeBuffer();
   if (buffer) {
     return buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+  }
+
+  const toBase64 = (bytes as ToBase64Capable).toBase64;
+  if (typeof toBase64 === "function") {
+    return toBase64.call(bytes);
   }
 
   let out = "";

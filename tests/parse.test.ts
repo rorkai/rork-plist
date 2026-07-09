@@ -210,6 +210,10 @@ describe("data", () => {
     // payload without an error is the failure mode this library refuses.
     expect(() => parsePlist("<data>AQ!L</data>")).toThrow(PlistParseError);
   });
+
+  test("accepts a form feed inside data, like the platform parser", () => {
+    expect(parsePlist("<data>AQL+\fAQ==</data>")).toEqual(new Uint8Array([1, 2, 254, 1]));
+  });
 });
 
 describe("structure errors", () => {
