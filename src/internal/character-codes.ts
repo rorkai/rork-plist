@@ -14,6 +14,9 @@ export const TAB = 0x09;
 /** The line feed character, `\n`. */
 export const LINE_FEED = 0x0a;
 
+/** The form feed character, `\f`. */
+export const FORM_FEED = 0x0c;
+
 /** The carriage return character, `\r`. */
 export const CARRIAGE_RETURN = 0x0d;
 
@@ -100,10 +103,11 @@ export const MAX_CODE_POINT = 0x10_ffff;
 
 /**
  * Reports whether a code unit is XML whitespace (space, tab, line feed, or
- * carriage return).
+ * carriage return), the set that separates plist markup tokens.
  *
- * The same set separates plist markup tokens and is ignorable inside
- * `<data>` content, so the scanner and the base64 codec share this predicate.
+ * The base64 codec does not share this predicate: its whitespace set also
+ * includes the form feed, matching the platform parser and the standard
+ * `Uint8Array.fromBase64` codec.
  */
 export function isWhitespaceCode(code: number): boolean {
   return code === SPACE || code === TAB || code === LINE_FEED || code === CARRIAGE_RETURN;

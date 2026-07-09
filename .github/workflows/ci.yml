@@ -42,6 +42,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Build, format check, lint, typecheck, and the full test suite.
       - run: pnpm checks
+      # Re-run the suite with V8's flag for the standard Uint8Array base64
+      # codec, which stock Node does not enable yet. This exercises the
+      # native decode tier and its differential test against this library's
+      # own paths. Worker threads inherit process-wide V8 flags, so the run
+      # pins the threads pool; the default forks pool spawns child processes
+      # that would drop the flag.
+      - if: matrix.node == 24
+        name: tests with the standard base64 codec enabled
+        run: node --js-base-64 ./node_modules/vitest/vitest.mjs run --pool=threads
       # Catch packaging mistakes (missing files, broken exports) before a
       # release does. `pnpm pack` assembles the tarball without contacting the
       # registry — unlike `publish --dry-run`, which refuses once the current

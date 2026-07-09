@@ -129,7 +129,9 @@ await writeFile("project.pbxproj", buildOpenStepPlist(project));
 
 ### `encodeBase64(bytes)` / `decodeBase64(text)`
 
-The strict RFC 4648 codec used for `<data>` elements, exported because protocol code usually needs one. `decodeBase64` tolerates whitespace and omitted padding but rejects everything else.
+The strict RFC 4648 codec used for `<data>` elements, exported because protocol code usually needs one. `decodeBase64` tolerates ASCII whitespace and omitted padding but rejects everything else.
+
+The codec picks the fastest implementation the host provides, with identical observable behavior on every tier: short inputs decode on a dedicated fast path, longer ones through the standard `Uint8Array.fromBase64` where it has shipped, then through the `Buffer` global, then through portable JavaScript. Rejections always report through the library's own validation, so error types and messages do not vary by host.
 
 ## Value mapping
 
