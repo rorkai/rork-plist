@@ -1,4 +1,4 @@
-import { parsePlist, PlistParseError } from "../src/index";
+import { parsePlist, PlistParseError, PlistUid } from "../src/index";
 
 const HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -213,6 +213,32 @@ describe("data", () => {
 
   test("accepts a form feed inside data, like the platform parser", () => {
     expect(parsePlist("<data>AQL+\fAQ==</data>")).toEqual(new Uint8Array([1, 2, 254, 1]));
+  });
+});
+
+describe("keyed-archive UIDs", () => {
+  test("reads the one-key CF$UID integer dictionary as a UID", () => {
+    expect(parsePlist("<dict><key>CF$UID</key><integer>7</integer></dict>")).toEqual(new PlistUid(7));
+    expect(parsePlist("<dict><key>CF$UID</key><integer>0</integer></dict>")).toEqual(new PlistUid(0));
+    expect(parsePlist("<dict><key>CF$UID</key><integer>4294967295</integer></dict>")).toEqual(
+      new PlistUid(0xff_ff_ff_ff),
+    );
+  });
+
+  // The platform coerces reals and wraps out-of-range integers modulo 2^32
+  // when reading this shape; both silently corrupt the index, so anything
+  // non-canonical stays an ordinary dictionary.
+  test("leaves non-canonical CF$UID dictionaries as dictionaries", () => {
+    expect(parsePlist("<dict><key>CF$UID</key><integer>7</integer><key>x</key><string>y</string></dict>")).toEqual({
+      CF$UID: 7,
+      x: "y",
+    });
+    expect(parsePlist("<dict><key>CF$UID</key><string>7</string></dict>")).toEqual({ CF$UID: "7" });
+    expect(parsePlist("<dict><key>CF$UID</key><real>7.5</real></dict>")).toEqual({ CF$UID: 7.5 });
+    expect(parsePlist("<dict><key>CF$UID</key><integer>-3</integer></dict>")).toEqual({ CF$UID: -3 });
+    expect(parsePlist("<dict><key>CF$UID</key><integer>8589934592</integer></dict>")).toEqual({
+      CF$UID: 8589934592,
+    });
   });
 });
 

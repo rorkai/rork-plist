@@ -35,7 +35,7 @@ import {
   TAB,
 } from "./internal/character-codes";
 import { PLIST_INTEGER_MAX, PLIST_INTEGER_MIN } from "./internal/integer-range";
-import type { PlistDictionary, PlistValue } from "./types";
+import { PlistUid, type PlistDictionary, type PlistValue } from "./types";
 
 /**
  * Options accepted by {@link buildPlist}.
@@ -193,6 +193,11 @@ class Builder {
    * Sets) has no property list representation and is rejected.
    */
   private appendObject(value: object & PlistValue, path: string, depth: number): void {
+    if (value instanceof PlistUid) {
+      this.appendUid(value, depth);
+      return;
+    }
+
     if (value instanceof Date) {
       this.appendDate(value, path, depth);
       return;
@@ -224,6 +229,17 @@ class Builder {
     }
 
     this.appendDict(value, path, depth);
+  }
+
+  /**
+   * Serializes a UID as the one-key `CF$UID` integer dictionary — the exact
+   * shape the platform writes for a UID in XML and reads back as one.
+   */
+  private appendUid(value: PlistUid, depth: number): void {
+    this.appendLine(depth, "<dict>");
+    this.appendLine(depth + 1, "<key>CF$UID</key>");
+    this.appendLine(depth + 1, `<integer>${value.uid}</integer>`);
+    this.appendLine(depth, "</dict>");
   }
 
   /**

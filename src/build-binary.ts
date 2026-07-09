@@ -29,7 +29,7 @@ import {
   PLIST_INTEGER_MAX,
   PLIST_INTEGER_MIN,
 } from "./internal/integer-range";
-import type { PlistValue } from "./types";
+import { PlistUid, type PlistValue } from "./types";
 
 /** `bplist00` — the 8-byte magic every binary property list starts with. */
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
@@ -157,6 +157,8 @@ class BinaryBuilder {
    */
   private readonly stringIndex = new Map<string, number>();
   private readonly integerNumberIndex = new Map<number, number>();
+
+  private readonly uidIndex = new Map<number, number>();
   private readonly integerBigIntIndex = new Map<bigint, number>();
   private readonly realIndex = new Map<number, number>();
   private readonly dateIndex = new Map<number, number>();
@@ -305,6 +307,10 @@ class BinaryBuilder {
    * object-shaped — class instances, `Map`, `Set` — is rejected.
    */
   private internObject(value: object & PlistValue, path: string): number {
+    if (value instanceof PlistUid) {
+      return this.internUid(value.uid);
+    }
+
     if (value instanceof Date) {
       const time = value.getTime();
       if (Number.isNaN(time)) {
@@ -407,6 +413,22 @@ class BinaryBuilder {
     }
     const index = this.appendScalar([this.encodeInteger(value)]);
     this.integerBigIntIndex.set(value, index);
+    return index;
+  }
+
+  /**
+   * Interns a UID, deduplicating by value. The width is the smallest of 1,
+   * 2, or 4 bytes — the platform writer skips 3-byte payloads the same way,
+   * and its reader accepts nothing wider than 4.
+   */
+  private internUid(uid: number): number {
+    const existing = this.uidIndex.get(uid);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const size = uid <= 0xff ? 1 : uid <= 0xff_ff ? 2 : 4;
+    const index = this.appendScalar([this.encodeIntBytes(0x80 | (size - 1), BigInt(uid), size)]);
+    this.uidIndex.set(uid, index);
     return index;
   }
 

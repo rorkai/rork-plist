@@ -24,4 +24,4 @@ export { parsePlist } from "./parse";
 export { parseBinaryPlist } from "./parse-binary";
 export { parseOpenStepPlist } from "./parse-openstep";
 export type { ParsePlistOptions } from "./parse-options";
-export type { PlistArray, PlistDictionary, PlistValue } from "./types";
+export { PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";

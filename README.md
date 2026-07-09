@@ -147,12 +147,15 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 | `<data>`              | `Uint8Array`                                           |
 | `<array>`             | `PlistValue[]`                                         |
 | `<dict>`              | plain object, keys in document order                   |
+| UID (keyed archives)  | `PlistUid`                                             |
+
+UIDs are the object-table references NSKeyedArchiver writes. XML has no UID element, so a UID renders as a dictionary holding a single `CF$UID` integer — the platform's own representation — and exactly that shape parses back as a `PlistUid`. A `CF$UID` dictionary with extra keys, a non-integer value, or an index outside 32 bits stays an ordinary dictionary: the platform coerces and wraps such values when reading, which silently corrupts the index, and this library does not.
 
 ## Behavior notes
 
 Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS. Beyond the fixtures, `pnpm corpus` sweeps the local machine's real property lists — tens of thousands of system, framework, and application files from bytes to tens of megabytes — parsing every one and cross-validating a stratified sample against `plutil` value by value.
 
-- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
+- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects parse as `PlistUid` (so NSKeyedArchiver documents work) and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
 - **OpenStep plists** — the format of Xcode's `project.pbxproj` and of `.strings` localization files — parse via `parsePlist` or `parseOpenStepPlist` and build via `buildOpenStepPlist`. The parsing grammar follows the reference parser, probed case by case: single- and double-quoted strings, the C escape set, octal escapes mapped through the NeXTSTEP encoding, raw `\U` code units, non-nesting comments, whitespace-separated hex data groups, the bare-key `"key";` shorthand, and brace-less strings-file documents. The format is untyped, so leaves parse as strings or data, and the writer accepts exactly that value model — typed values are rejected rather than silently stringified. The platform tooling cannot write OpenStep at all, so written output is verified by acceptance: it parses identically through this library and the platform parser.
 

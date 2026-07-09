@@ -26,7 +26,7 @@
 
 import { PlistBuildError } from "./errors";
 import { isOpenStepBareCode } from "./parse-openstep";
-import type { PlistDictionary, PlistValue } from "./types";
+import { PlistUid, type PlistDictionary, type PlistValue } from "./types";
 
 /**
  * The 256 two-digit lowercase hex spellings, indexed by byte value. Data
@@ -138,12 +138,13 @@ class OpenStepBuilder {
     }
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
-      throw new PlistBuildError(
-        value instanceof Date
-          ? "dates have no OpenStep representation; serialize the date as a string first"
-          : "class instances have no OpenStep representation",
-        path,
-      );
+      if (value instanceof Date) {
+        throw new PlistBuildError("dates have no OpenStep representation; serialize the date as a string first", path);
+      }
+      if (value instanceof PlistUid) {
+        throw new PlistBuildError("UIDs have no OpenStep representation", path);
+      }
+      throw new PlistBuildError("class instances have no OpenStep representation", path);
     }
     this.appendDict(value as PlistDictionary, path, depth);
   }

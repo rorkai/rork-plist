@@ -6,12 +6,13 @@
  * accuracy audit the synthetic test fixtures cannot provide, and it doubles
  * as a performance measurement over real documents bucketed by size.
  *
- * Files the format does not cover are counted, not failed. Keyed archives
- * (UID objects) and OpenStep text plists are deliberately unsupported, and
- * files plutil itself rejects are corrupt input, not evidence. A file that
- * plutil parses but this library cannot — or a sampled file whose parsed
- * value disagrees with plutil's reading — is a real finding and fails the
- * run.
+ * Files the format does not cover are counted, not failed: binary versions
+ * past bplist00, and files plutil itself rejects (corrupt input, not
+ * evidence). A file that plutil parses but this library cannot — or a
+ * sampled file whose parsed value disagrees with plutil's reading — is a
+ * real finding and fails the run. Keyed archives parse like any other
+ * binary plist since UID support landed; the failure category remains so a
+ * regression shows up by name.
  *
  * Run with `pnpm corpus`. Roots, file cap, and the plutil sample size are
  * flags; macOS is required for the differential half.
@@ -23,7 +24,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { parsePlist, PlistParseError, type PlistValue } from "../dist/index.js";
+import { parsePlist, PlistParseError, PlistUid, type PlistValue } from "../dist/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -137,6 +138,9 @@ interface ParsedFile {
  * precision while binary dates carry milliseconds, so timestamps compare
  * with one-second tolerance; everything else compares exactly. */
 function plistEqual(a: PlistValue, b: PlistValue): boolean {
+  if (a instanceof PlistUid || b instanceof PlistUid) {
+    return a instanceof PlistUid && b instanceof PlistUid && a.uid === b.uid;
+  }
   if (a instanceof Date && b instanceof Date) {
     return Math.abs(a.getTime() - b.getTime()) < 1000;
   }

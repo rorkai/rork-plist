@@ -19,9 +19,11 @@
  * hexadecimal integers, `nan`/`inf` reals, second-precision UTC dates,
  * duplicate dictionary keys resolving to the last occurrence, `<key>`
  * outside a dictionary parsing as a string, attributes being ignored, and
- * content after the closing `</plist>` tag being ignored. The one deliberate
- * strictness deviation is documented on {@link parsePlist} — corrupt base64
- * in `<data>` raises an error instead of silently decoding to fewer bytes.
+ * content after the closing `</plist>` tag being ignored. Two deliberate
+ * strictness deviations refuse silent corruption: corrupt base64 in `<data>`
+ * raises an error instead of decoding to fewer bytes, and only the canonical
+ * `CF$UID` dictionary shape becomes a UID (see {@link asKeyedArchiveUid})
+ * instead of coercing and wrapping the way the platform reader does.
  *
  * @module
  */
@@ -63,7 +65,7 @@ import {
 import { hasBinaryPlistMagic, parseBinaryPlist } from "./parse-binary";
 import { parseOpenStepPlist } from "./parse-openstep";
 import { DEFAULT_MAX_DEPTH, type ParsePlistOptions } from "./parse-options";
-import type { PlistArray, PlistDictionary, PlistValue } from "./types";
+import { PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
 
 export type { ParsePlistOptions } from "./parse-options";
 
@@ -346,6 +348,28 @@ function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
 }
 
 /**
+ * Returns the UID a dictionary encodes, or null for an ordinary dictionary.
+ *
+ * XML has no UID element; the platform renders a UID as a dictionary holding
+ * a single `CF$UID` integer and reads that shape back as a UID. Only the
+ * canonical form converts — one key, an integral number within 32 bits. The
+ * platform also coerces reals and wraps out-of-range integers modulo 2^32
+ * when reading this shape; both silently corrupt the index, so such
+ * dictionaries stay dictionaries here (the same strictness stance as
+ * rejecting corrupt base64).
+ */
+function asKeyedArchiveUid(dict: PlistDictionary): PlistUid | null {
+  const uid = dict["CF$UID"];
+  if (typeof uid !== "number" || !Number.isInteger(uid) || uid < 0 || uid > 0xff_ff_ff_ff) {
+    return null;
+  }
+  if (Object.keys(dict).length !== 1) {
+    return null;
+  }
+  return new PlistUid(uid);
+}
+
+/**
  * Single-use recursive-descent parser over one source string.
  *
  * The instance tracks one piece of state — the current offset `pos` — and
@@ -412,8 +436,10 @@ class Parser {
    */
   private parseValue(tag: OpenTag, depth: number): PlistValue {
     switch (tag.name) {
-      case "dict":
-        return this.parseDict(depth + 1, tag.selfClosed);
+      case "dict": {
+        const dict = this.parseDict(depth + 1, tag.selfClosed);
+        return asKeyedArchiveUid(dict) ?? dict;
+      }
       case "array":
         return this.parseArray(depth + 1, tag.selfClosed);
       // The reference parser treats a stray <key> outside dictionary

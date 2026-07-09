@@ -15,6 +15,10 @@
  * | `<array>`             | {@link PlistArray}                                       |
  * | `<dict>`              | {@link PlistDictionary}                                  |
  *
+ * Keyed-archive UID objects have no XML element of their own; they surface
+ * as {@link PlistUid} and render as the one-key `CF$UID` integer dictionary
+ * the platform uses.
+ *
  * @module
  */
 
@@ -32,7 +36,45 @@
  *   round-trip as a `<real>` — protocols that depend on the distinction
  *   should carry reals as fractional values.
  */
-export type PlistValue = string | number | bigint | boolean | Date | Uint8Array | PlistArray | PlistDictionary;
+export type PlistValue =
+  | string
+  | number
+  | bigint
+  | boolean
+  | Date
+  | Uint8Array
+  | PlistUid
+  | PlistArray
+  | PlistDictionary;
+
+/**
+ * A keyed-archive UID — the object-table reference NSKeyedArchiver stores
+ * between entries of its `$objects` array.
+ *
+ * The binary format stores UIDs as unsigned integers of one to four bytes
+ * (the platform reader rejects wider payloads), so the index is capped at
+ * 32 bits. XML has no UID element; the platform renders a UID as a
+ * dictionary holding a single `CF$UID` integer, and reads exactly that shape
+ * back as a UID, so this library does the same in both directions.
+ */
+export class PlistUid {
+  /** The archive object-table index. */
+  readonly uid: number;
+
+  /**
+   * @param uid An integer from 0 to 0xffffffff.
+   * @throws RangeError when the value cannot be a UID: not an integer,
+   *   negative, or beyond 32 bits. The platform writer silently wraps such
+   *   values modulo 2^32; refusing them instead keeps a corrupted archive
+   *   from being written at all.
+   */
+  constructor(uid: number) {
+    if (!Number.isInteger(uid) || uid < 0 || uid > 0xff_ff_ff_ff) {
+      throw new RangeError(`a UID must be an unsigned 32-bit integer, got ${uid}`);
+    }
+    this.uid = uid;
+  }
+}
 
 /**
  * An `<array>` element — an ordered list of property list values.
