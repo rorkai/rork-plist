@@ -26,6 +26,22 @@ test("ignores whitespace anywhere in the input", () => {
   expect(decodeBase64(" Zm9v\n\tYmFy \r\n")).toEqual(decodeBase64("Zm9vYmFy"));
 });
 
+// Short inputs decode on a separate fast path; sweeping payload sizes across
+// the path boundary proves both paths agree byte for byte, padded or not,
+// bare or whitespace-wrapped.
+test("decodes identically on both sides of the small-input fast path", () => {
+  for (let length = 0; length <= 80; length++) {
+    const bytes = new Uint8Array(length).map((_, i) => (i * 53 + length) & 0xff);
+    const base64 = encodeBase64(bytes);
+    const wrapped = `\n\t${base64.replaceAll(/(.{20})/gu, "$1\n\t")}\n`;
+    const unpadded = base64.replace(/=+$/u, "");
+
+    expect(decodeBase64(base64), `bare, ${length} bytes`).toEqual(bytes);
+    expect(decodeBase64(wrapped), `wrapped, ${length} bytes`).toEqual(bytes);
+    expect(decodeBase64(unpadded), `unpadded, ${length} bytes`).toEqual(bytes);
+  }
+});
+
 test("accepts unpadded final groups", () => {
   expect(decodeBase64("Zm9vYg")).toEqual(decodeBase64("Zm9vYg=="));
   expect(decodeBase64("Zm9vYmE")).toEqual(decodeBase64("Zm9vYmE="));

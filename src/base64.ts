@@ -14,7 +14,7 @@
  * @module
  */
 
-import { EQUALS_SIGN } from "./internal/character-codes";
+import { EQUALS_SIGN, isWhitespaceCode } from "./internal/character-codes";
 
 /** The RFC 4648 section 4 alphabet, indexed by six-bit value. */
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -27,6 +27,25 @@ const DECODE_TABLE = new Int8Array(128).fill(-1);
 for (let i = 0; i < ALPHABET.length; i++) {
   DECODE_TABLE[ALPHABET.charCodeAt(i)] = i;
 }
+
+/**
+ * Longest input, in characters, that decodes on the small-input fast path.
+ *
+ * Real documents are dominated by short `<data>` payloads — 20- and 32-byte
+ * hashes arrive as 30–50 characters of wrapped base64 — and at those sizes
+ * the fixed costs of the general path (two regular-expression passes, a
+ * pooled native buffer, and the copy out of the pool) exceed the cost of
+ * decoding in plain JavaScript. The measured crossover on Node 24 sits near
+ * 48 decoded bytes; above it the general path is faster and takes over.
+ */
+const SMALL_INPUT_MAX_LENGTH = 64;
+
+/**
+ * Scratch output for the small-input fast path, sized for the most bytes
+ * {@link SMALL_INPUT_MAX_LENGTH} characters can carry (three bytes per four
+ * symbols). Decoding fills a prefix and slices it off as the caller's copy.
+ */
+const SMALL_DECODE_SCRATCH = new Uint8Array((SMALL_INPUT_MAX_LENGTH / 4) * 3);
 
 /**
  * Detects whether whitespace stripping is needed at all, so the common
@@ -108,6 +127,65 @@ function trailingByteCount(remainder: number): number {
 }
 
 /**
+ * Decodes a short input in one pass, or returns `null` to send it through
+ * the general path.
+ *
+ * The pass validates and decodes simultaneously: alphabet symbols accumulate
+ * bits, whitespace is skipped, and anything irregular — a character outside
+ * the alphabet, padding followed by more symbols, excess padding, or a
+ * truncated final group — abandons the fast path instead of reporting the
+ * problem, so every rejection message keeps coming from one place, the
+ * general path.
+ *
+ * @returns The decoded bytes, or `null` when the input needs the general
+ *   path's full validation.
+ */
+function decodeSmallBase64(text: string): Uint8Array | null {
+  let symbolCount = 0;
+  let padCount = 0;
+  let accumulator = 0;
+  let bitsCollected = 0;
+  let outIndex = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const value = code < 128 ? DECODE_TABLE[code]! : -1;
+    if (value >= 0) {
+      if (padCount > 0) {
+        return null;
+      }
+      symbolCount++;
+      accumulator = (accumulator << 6) | value;
+      bitsCollected += 6;
+      if (bitsCollected >= 8) {
+        bitsCollected -= 8;
+        SMALL_DECODE_SCRATCH[outIndex++] = (accumulator >>> bitsCollected) & 0xff;
+      }
+      continue;
+    }
+    if (code === EQUALS_SIGN) {
+      if (padCount === 2) {
+        return null;
+      }
+      padCount++;
+      continue;
+    }
+    if (isWhitespaceCode(code)) {
+      continue;
+    }
+    return null;
+  }
+
+  if (padCount > 0 && (symbolCount + padCount) % 4 !== 0) {
+    return null;
+  }
+  if (symbolCount % 4 === 1) {
+    return null;
+  }
+  return SMALL_DECODE_SCRATCH.slice(0, outIndex);
+}
+
+/**
  * Returns the six-bit value of one validated alphabet symbol.
  *
  * Input reaching this function has already passed the shape check, so a
@@ -139,6 +217,13 @@ function symbolValue(code: number): number {
  * @throws RangeError when the input is not valid base64.
  */
 export function decodeBase64(text: string): Uint8Array {
+  if (text.length <= SMALL_INPUT_MAX_LENGTH) {
+    const decoded = decodeSmallBase64(text);
+    if (decoded !== null) {
+      return decoded;
+    }
+  }
+
   const stripped = CONTAINS_WHITESPACE.test(text) ? text.replace(WHITESPACE_RUNS, "") : text;
 
   if (!BASE64_SHAPE.test(stripped)) {
