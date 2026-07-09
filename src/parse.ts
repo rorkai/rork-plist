@@ -385,14 +385,6 @@ class Parser {
   private pos = 0;
 
   /**
-   * Set when the dictionary that just finished parsing has exactly one
-   * entry keyed `CF$UID`, the shape a keyed-archive UID takes in XML.
-   * {@link resolveDict} consumes the flag immediately after
-   * {@link parseDict} returns, so it never survives into another dictionary.
-   */
-  private dictIsUidCandidate = false;
-
-  /**
    * Position of the next `&` at or ahead of the text being decoded, or -1
    * once none remains; -2 until the first scan. Text decoding must know
    * whether a range contains a reference, but `indexOf` has no end bound —
@@ -448,7 +440,7 @@ class Parser {
   private parseValue(tag: OpenTag, depth: number): PlistValue {
     switch (tag.name) {
       case "dict":
-        return this.resolveDict(this.parseDict(depth + 1, tag.selfClosed));
+        return this.parseDict(depth + 1, tag.selfClosed);
       case "array":
         return this.parseArray(depth + 1, tag.selfClosed);
       // The reference parser treats a stray <key> outside dictionary
@@ -484,24 +476,28 @@ class Parser {
    * Later duplicate keys win, matching the reference parser. A literal
    * `__proto__` key is defined as an own property so untrusted documents
    * cannot pollute prototypes.
+   *
+   * A dictionary whose only entry is keyed `CF$UID` returns as the UID it
+   * encodes when the shape is canonical (see {@link asKeyedArchiveUid}).
+   * Tracking the first key while parsing costs a single string comparison
+   * per dictionary, where probing every finished dictionary for the key
+   * measured 7% on dict-heavy parses.
    */
-  private parseDict(depth: number, selfClosed: boolean): PlistDictionary {
+  private parseDict(depth: number, selfClosed: boolean): PlistDictionary | PlistUid {
     this.checkDepth(depth);
     const dict: PlistDictionary = {};
     if (selfClosed) {
       return dict;
     }
 
-    this.dictIsUidCandidate = false;
     let entryCount = 0;
     let firstKey = "";
     for (;;) {
       const keyTag = this.nextTagOrClose("dict", "<key> or </dict>");
       if (keyTag === null) {
-        // Flagging the one-entry CF$UID shape here costs a single string
-        // comparison per dictionary, where probing the finished dictionary
-        // for the key from the dispatcher measured 7% on dict-heavy parses.
-        this.dictIsUidCandidate = entryCount === 1 && firstKey === "CF$UID";
+        if (entryCount === 1 && firstKey === "CF$UID") {
+          return asKeyedArchiveUid(dict) ?? dict;
+        }
         return dict;
       }
       if (keyTag.name !== "key") {
@@ -526,20 +522,6 @@ class Parser {
         dict[key] = value;
       }
     }
-  }
-
-  /**
-   * Converts a just-parsed dictionary into the UID it encodes when
-   * {@link parseDict} flagged it as the one-key `CF$UID` shape, and returns
-   * it unchanged otherwise. Consuming the flag here, immediately after the
-   * parse, keeps it from surviving into another dictionary.
-   */
-  private resolveDict(dict: PlistDictionary): PlistDictionary | PlistUid {
-    if (!this.dictIsUidCandidate) {
-      return dict;
-    }
-    this.dictIsUidCandidate = false;
-    return asKeyedArchiveUid(dict) ?? dict;
   }
 
   /**
