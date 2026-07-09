@@ -193,11 +193,6 @@ class Builder {
    * Sets) has no property list representation and is rejected.
    */
   private appendObject(value: object & PlistValue, path: string, depth: number): void {
-    if (value instanceof PlistUid) {
-      this.appendUid(value, depth);
-      return;
-    }
-
     if (value instanceof Date) {
       this.appendDate(value, path, depth);
       return;
@@ -225,6 +220,12 @@ class Builder {
 
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
+      // The UID test lives on this branch, which plain dictionaries never
+      // reach, so documents without UIDs pay nothing for the support.
+      if (value instanceof PlistUid) {
+        this.appendUid(value, depth);
+        return;
+      }
       throw new PlistBuildError("class instances have no property list representation", path);
     }
 

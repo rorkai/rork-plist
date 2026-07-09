@@ -317,10 +317,6 @@ class BinaryBuilder {
    * object-shaped — class instances, `Map`, `Set` — is rejected.
    */
   private internObject(value: object & PlistValue, path: string): number {
-    if (value instanceof PlistUid) {
-      return this.internUid(value.uid);
-    }
-
     if (value instanceof Date) {
       const time = value.getTime();
       if (Number.isNaN(time)) {
@@ -345,6 +341,12 @@ class BinaryBuilder {
 
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
+      // The UID test lives on this branch, which plain dictionaries never
+      // reach, because testing it before the prototype check taxed every
+      // object and measured 27% on dictionary-heavy binary builds.
+      if (value instanceof PlistUid) {
+        return this.internUid(value.uid);
+      }
       throw new PlistBuildError("class instances have no property list representation", path);
     }
     return this.internDict(value, path);
