@@ -15,7 +15,7 @@
  * | `<array>`             | {@link PlistArray}                                       |
  * | `<dict>`              | {@link PlistDictionary}                                  |
  *
- * Keyed-archive UID objects have no XML element of their own; they surface
+ * Keyed-archive UID objects have no XML element of their own. They surface
  * as {@link PlistUid} and render as the one-key `CF$UID` integer dictionary
  * the platform uses.
  *
@@ -48,14 +48,14 @@ export type PlistValue =
   | PlistDictionary;
 
 /**
- * A keyed-archive UID — the object-table reference NSKeyedArchiver stores
+ * A keyed-archive UID, the object-table reference NSKeyedArchiver stores
  * between entries of its `$objects` array.
  *
- * The binary format stores UIDs as unsigned integers of one to four bytes
- * (the platform reader rejects wider payloads), so the index is capped at
- * 32 bits. XML has no UID element; the platform renders a UID as a
- * dictionary holding a single `CF$UID` integer, and reads exactly that shape
- * back as a UID, so this library does the same in both directions.
+ * The binary format stores a UID as an unsigned integer of one to four
+ * bytes and the platform reader rejects anything wider, so an index never
+ * exceeds 32 bits. XML has no UID element. The platform renders a UID there
+ * as a dictionary holding a single `CF$UID` integer and reads exactly that
+ * shape back as a UID, and this library does the same in both directions.
  */
 export class PlistUid {
   /** The archive object-table index. */
@@ -63,9 +63,9 @@ export class PlistUid {
 
   /**
    * @param uid An integer from 0 to 0xffffffff.
-   * @throws RangeError when the value cannot be a UID: not an integer,
-   *   negative, or beyond 32 bits. The platform writer silently wraps such
-   *   values modulo 2^32; refusing them instead keeps a corrupted archive
+   * @throws RangeError when the value is not an integer, is negative, or
+   *   does not fit in 32 bits. The platform writer silently wraps such
+   *   values modulo 2^32, and refusing them here keeps a corrupted archive
    *   from being written at all.
    */
   constructor(uid: number) {

@@ -417,9 +417,9 @@ class BinaryBuilder {
   }
 
   /**
-   * Interns a UID, deduplicating by value. The width is the smallest of 1,
-   * 2, or 4 bytes — the platform writer skips 3-byte payloads the same way,
-   * and its reader accepts nothing wider than 4.
+   * Interns a UID, deduplicating by value. The payload takes the smallest
+   * of one, two, or four bytes. The platform writer skips three-byte
+   * payloads the same way and its reader accepts nothing wider than four.
    */
   private internUid(uid: number): number {
     const existing = this.uidIndex.get(uid);

@@ -20,10 +20,10 @@
  * duplicate dictionary keys resolving to the last occurrence, `<key>`
  * outside a dictionary parsing as a string, attributes being ignored, and
  * content after the closing `</plist>` tag being ignored. Two deliberate
- * strictness deviations refuse silent corruption: corrupt base64 in `<data>`
+ * strictness deviations refuse silent corruption. Corrupt base64 in `<data>`
  * raises an error instead of decoding to fewer bytes, and only the canonical
  * `CF$UID` dictionary shape becomes a UID (see {@link asKeyedArchiveUid})
- * instead of coercing and wrapping the way the platform reader does.
+ * rather than coercing and wrapping the way the platform reader does.
  *
  * @module
  */
@@ -350,13 +350,13 @@ function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
 /**
  * Returns the UID a dictionary encodes, or null for an ordinary dictionary.
  *
- * XML has no UID element; the platform renders a UID as a dictionary holding
- * a single `CF$UID` integer and reads that shape back as a UID. Only the
- * canonical form converts — one key, an integral number within 32 bits. The
- * platform also coerces reals and wraps out-of-range integers modulo 2^32
- * when reading this shape; both silently corrupt the index, so such
- * dictionaries stay dictionaries here (the same strictness stance as
- * rejecting corrupt base64).
+ * XML has no UID element. The platform renders a UID as a dictionary
+ * holding a single `CF$UID` integer and reads that shape back as a UID.
+ * Only the canonical form converts, meaning one key whose value is an
+ * integral number within 32 bits. When the platform reads anything else in
+ * this shape it coerces reals and wraps out-of-range integers modulo 2^32,
+ * which silently corrupts the index, so such dictionaries stay ordinary
+ * dictionaries here for the same reason corrupt base64 stays an error.
  */
 function asKeyedArchiveUid(dict: PlistDictionary): PlistUid | null {
   const uid = dict["CF$UID"];

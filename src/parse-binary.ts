@@ -357,10 +357,10 @@ class BinaryParser {
 
   /**
    * Resolves a UID object, the object-table reference a keyed archiver
-   * stores. The marker's low nibble is the payload byte count minus one; the
-   * platform reader accepts one to four bytes and rejects wider payloads
-   * (probed with hand-assembled documents — a five- or eight-byte UID fails
-   * CF parsing), so this parser draws the same line.
+   * stores. The marker's low nibble is the payload byte count minus one.
+   * The platform reader accepts one to four payload bytes and refuses
+   * anything wider, which hand-assembled five- and eight-byte documents
+   * confirm, so this parser draws the same line.
    */
   private parseUid(offset: number, objectInfo: number): PlistUid {
     const byteCount = objectInfo + 1;

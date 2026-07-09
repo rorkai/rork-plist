@@ -6,13 +6,13 @@
  * accuracy audit the synthetic test fixtures cannot provide, and it doubles
  * as a performance measurement over real documents bucketed by size.
  *
- * Files the format does not cover are counted, not failed: binary versions
- * past bplist00, and files plutil itself rejects (corrupt input, not
- * evidence). A file that plutil parses but this library cannot — or a
+ * Files the format does not cover are counted rather than failed, which
+ * covers binary versions past bplist00 and files plutil itself rejects as
+ * corrupt input. A file that plutil parses but this library cannot — or a
  * sampled file whose parsed value disagrees with plutil's reading — is a
  * real finding and fails the run. Keyed archives parse like any other
- * binary plist since UID support landed; the failure category remains so a
- * regression shows up by name.
+ * binary plist since UID support landed, and their failure category remains
+ * only so a regression would show up by name.
  *
  * Run with `pnpm corpus`. Roots, file cap, and the plutil sample size are
  * flags; macOS is required for the differential half.

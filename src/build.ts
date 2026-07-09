@@ -232,7 +232,7 @@ class Builder {
   }
 
   /**
-   * Serializes a UID as the one-key `CF$UID` integer dictionary — the exact
+   * Serializes a UID as the one-key `CF$UID` integer dictionary, the exact
    * shape the platform writes for a UID in XML and reads back as one.
    */
   private appendUid(value: PlistUid, depth: number): void {

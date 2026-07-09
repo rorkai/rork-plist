@@ -277,9 +277,9 @@ describe("UID objects", () => {
     const built = buildBinaryPlist([new PlistUid(9), new PlistUid(9), new PlistUid(300)]);
 
     expect(parseBinaryPlist(built)).toEqual([new PlistUid(9), new PlistUid(9), new PlistUid(300)]);
-    // Root array + interned 9 + interned 300 = 3 objects; a writer without
-    // interning would emit 4. numObjects is the big-endian u64 at trailer
-    // offset 8 from the end minus 24.
+    // The root array plus one object each for 9 and 300 makes three objects,
+    // where a writer without interning would emit four. numObjects is the
+    // big-endian u64 that starts 24 bytes before the end of the trailer.
     const view = new DataView(built.buffer, built.byteLength - 24, 8);
     expect(view.getUint32(4)).toBe(3);
   });
