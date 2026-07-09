@@ -147,7 +147,7 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 | `<data>`              | `Uint8Array`                                           |
 | `<array>`             | `PlistValue[]`                                         |
 | `<dict>`              | plain object, keys in document order                   |
-| UID (keyed archives)  | `PlistUid`                                             |
+| UID                   | `PlistUid`                                             |
 
 UIDs are the object-table references NSKeyedArchiver writes. XML has no UID element, so a UID renders as a dictionary holding a single `CF$UID` integer — the platform's own representation — and exactly that shape parses back as a `PlistUid`. A `CF$UID` dictionary with extra keys, a non-integer value, or an index outside 32 bits stays an ordinary dictionary. The platform coerces and wraps such values when it reads them, silently corrupting the index, and this library refuses to do that.
 
