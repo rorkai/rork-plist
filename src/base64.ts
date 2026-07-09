@@ -113,6 +113,11 @@ function nativeBuffer(): BufferConstructorLike | null {
  * probed case by case against this module's rules; the one divergence —
  * error type and wording — never surfaces because rejected input re-reports
  * through this module's own validation.
+ *
+ * The access goes through a cast because the program's `lib` is pinned to
+ * the ES2022 runtime floor, where the standard codec's declarations do not
+ * exist. Typing the property as optional right here is the point: it is
+ * exactly as reliable as the feature detection.
  */
 function nativeFromBase64(): ((text: string) => Uint8Array) | null {
   const candidate = (Uint8Array as { fromBase64?: unknown }).fromBase64;
@@ -121,7 +126,9 @@ function nativeFromBase64(): ((text: string) => Uint8Array) | null {
 
 /**
  * Interface of the standard `Uint8Array.prototype.toBase64` method used by
- * the encode fast path on hosts without `Buffer`.
+ * the encode fast path on hosts without `Buffer`. Declared locally for the
+ * same reason {@link nativeFromBase64} casts: the ES2022 `lib` floor has no
+ * declarations for the standard codec.
  */
 interface ToBase64Capable {
   toBase64?: () => string;
