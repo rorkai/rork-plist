@@ -386,9 +386,9 @@ class Parser {
 
   /**
    * Set when the dictionary that just finished parsing has exactly one
-   * entry keyed `CF$UID`, the shape a keyed-archive UID takes in XML. The
-   * dispatcher consumes the flag immediately after {@link parseDict}
-   * returns, so it never survives into another dictionary.
+   * entry keyed `CF$UID`, the shape a keyed-archive UID takes in XML.
+   * {@link resolveDict} consumes the flag immediately after
+   * {@link parseDict} returns, so it never survives into another dictionary.
    */
   private dictIsUidCandidate = false;
 
@@ -447,17 +447,8 @@ class Parser {
    */
   private parseValue(tag: OpenTag, depth: number): PlistValue {
     switch (tag.name) {
-      case "dict": {
-        const dict = this.parseDict(depth + 1, tag.selfClosed);
-        if (this.dictIsUidCandidate) {
-          this.dictIsUidCandidate = false;
-          const uid = asKeyedArchiveUid(dict);
-          if (uid !== null) {
-            return uid;
-          }
-        }
-        return dict;
-      }
+      case "dict":
+        return this.resolveDict(this.parseDict(depth + 1, tag.selfClosed));
       case "array":
         return this.parseArray(depth + 1, tag.selfClosed);
       // The reference parser treats a stray <key> outside dictionary
@@ -535,6 +526,20 @@ class Parser {
         dict[key] = value;
       }
     }
+  }
+
+  /**
+   * Converts a just-parsed dictionary into the UID it encodes when
+   * {@link parseDict} flagged it as the one-key `CF$UID` shape, and returns
+   * it unchanged otherwise. Consuming the flag here, immediately after the
+   * parse, keeps it from surviving into another dictionary.
+   */
+  private resolveDict(dict: PlistDictionary): PlistDictionary | PlistUid {
+    if (!this.dictIsUidCandidate) {
+      return dict;
+    }
+    this.dictIsUidCandidate = false;
+    return asKeyedArchiveUid(dict) ?? dict;
   }
 
   /**
