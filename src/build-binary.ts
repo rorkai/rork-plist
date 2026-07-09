@@ -29,7 +29,7 @@ import {
   PLIST_INTEGER_MAX,
   PLIST_INTEGER_MIN,
 } from "./internal/integer-range";
-import { PlistUid, type PlistValue } from "./types";
+import { PlistUid, type PlistDictionary, type PlistValue } from "./types";
 
 /** `bplist00` — the 8-byte magic every binary property list starts with. */
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
@@ -349,7 +349,9 @@ class BinaryBuilder {
       }
       throw new PlistBuildError("class instances have no property list representation", path);
     }
-    return this.internDict(value, path);
+    // The prototype check above proves this is a plain object, which the
+    // narrowing cannot see because the UID branch returns inside it.
+    return this.internDict(value as PlistDictionary, path);
   }
 
   /**

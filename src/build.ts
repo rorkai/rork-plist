@@ -229,7 +229,9 @@ class Builder {
       throw new PlistBuildError("class instances have no property list representation", path);
     }
 
-    this.appendDict(value, path, depth);
+    // The prototype check above proves this is a plain object, which the
+    // narrowing cannot see because the UID branch returns inside it.
+    this.appendDict(value as PlistDictionary, path, depth);
   }
 
   /**
