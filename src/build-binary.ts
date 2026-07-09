@@ -144,24 +144,34 @@ class BinaryBuilder {
   private readonly nodes: ObjectNode[] = [];
 
   /**
-   * Interned scalar indices, one map per scalar kind. Separate maps keyed by
-   * primitive values replace a single string-keyed map because building a
-   * canonical key string per scalar (`i:42`, `d:1751624430000`) allocated on
-   * every occurrence — including cache hits — and dominated dictionary-heavy
-   * builds.
-   *
-   * Integers within the safe-integer window key by `number`; only magnitudes
-   * beyond it key by `bigint` (each spelling of such a value converts
-   * exactly, so `42` and `42n` still intern to one object). The split keeps
-   * bigint allocation off the common lookup path.
+   * Interned `<string>` indices keyed by value. Every scalar kind below gets
+   * its own primitive-keyed map because a single map keyed by canonical
+   * strings (`i:42`, `d:1751624430000`) allocated a key string on every
+   * occurrence, cache hits included, and dominated dictionary-heavy builds.
    */
   private readonly stringIndex = new Map<string, number>();
+
+  /**
+   * Interned `<integer>` indices for values within the safe-integer window,
+   * keyed by `number` so the common lookup path never allocates a bigint.
+   */
   private readonly integerNumberIndex = new Map<number, number>();
 
-  private readonly uidIndex = new Map<number, number>();
+  /**
+   * Interned `<integer>` indices for magnitudes beyond the safe window.
+   * Either spelling of such a value converts exactly between `number` and
+   * `bigint`, so `42` and `42n` still intern to one object.
+   */
   private readonly integerBigIntIndex = new Map<bigint, number>();
+
+  /** Interned `<real>` indices keyed by value. */
   private readonly realIndex = new Map<number, number>();
+
+  /** Interned `<date>` indices keyed by epoch milliseconds. */
   private readonly dateIndex = new Map<number, number>();
+
+  /** Interned UID indices keyed by the archive object-table index. */
+  private readonly uidIndex = new Map<number, number>();
 
   /**
    * Interned `<data>` indices bucketed by payload length, for payloads small
