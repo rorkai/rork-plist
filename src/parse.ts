@@ -352,11 +352,14 @@ function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
  *
  * XML has no UID element. The platform renders a UID as a dictionary
  * holding a single `CF$UID` integer and reads that shape back as a UID.
- * Only the canonical form converts, meaning one key whose value is an
- * integral number within 32 bits. When the platform reads anything else in
- * this shape it coerces reals and wraps out-of-range integers modulo 2^32,
- * which silently corrupts the index, so such dictionaries stay ordinary
- * dictionaries here for the same reason corrupt base64 stays an error.
+ *
+ * Only the canonical form converts here, meaning one key whose value is an
+ * integral number within 32 bits.
+ *
+ * The platform is laxer when it reads this shape. It coerces reals and
+ * wraps out-of-range integers modulo 2^32, silently corrupting the index,
+ * so anything non-canonical stays an ordinary dictionary for the same
+ * reason corrupt base64 stays an error.
  */
 function asKeyedArchiveUid(dict: PlistDictionary): PlistUid | null {
   const uid = dict["CF$UID"];
