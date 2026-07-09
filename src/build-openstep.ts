@@ -51,25 +51,24 @@ export interface BuildOpenStepPlistOptions {
 /**
  * Serializes a value as an OpenStep (NeXTSTEP) text property list.
  *
- * Only the value model the format can represent is accepted: strings,
- * `Uint8Array` data, arrays, and plain-object dictionaries. Numbers,
- * bigints, booleans, and dates have no OpenStep representation — the format
- * is untyped — and are rejected with the offending value's path rather than
- * silently stringified; convert them deliberately before building. A
- * dictionary key whose value is `undefined` is omitted, matching the XML
- * and binary builders.
+ * The format is untyped, so only the value model it can represent is
+ * accepted, meaning strings, `Uint8Array` data, arrays, and plain-object
+ * dictionaries. Numbers, bigints, booleans, and dates are rejected with the
+ * offending value's path rather than silently stringified, so convert them
+ * deliberately before building. A dictionary key whose value is `undefined`
+ * is omitted, matching the XML and binary builders.
  *
  * The platform tooling has no OpenStep writer, so output cannot be diffed
- * against a reference layout; instead every emitted document is verified to
- * parse identically through this library and the platform parser.
+ * against a reference layout. Instead, every emitted document is verified
+ * to parse identically through this library and the platform parser.
  *
  * @param value The root value to serialize.
  * @param options See {@link BuildOpenStepPlistOptions}.
  * @returns The document text, terminated by a newline.
- * @throws PlistBuildError when a value has no OpenStep representation:
- *   numbers, bigints, booleans, dates, `null`, `undefined` (outside a
- *   dictionary value), functions, symbols, class instances, or circular
- *   references. The error names the path of the offending value.
+ * @throws PlistBuildError, naming the offending value's path, when a value
+ *   has no OpenStep representation. That covers numbers, bigints, booleans,
+ *   dates, UIDs, `null`, `undefined` outside a dictionary value, functions,
+ *   symbols, class instances, and circular references.
  */
 export function buildOpenStepPlist(value: PlistValue, options: BuildOpenStepPlistOptions = {}): string {
   const indent = options.indent ?? "\t";
@@ -124,7 +123,7 @@ class OpenStepBuilder {
       // The remaining primitives are exactly the typed values OpenStep
       // lacks: numbers, bigints, booleans, and the value-less types.
       throw new PlistBuildError(
-        `${typeof value} values have no OpenStep representation; serialize the value as a string first`,
+        `${typeof value} values have no OpenStep representation, serialize the value as a string first`,
         path,
       );
     }
@@ -139,7 +138,7 @@ class OpenStepBuilder {
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
       if (value instanceof Date) {
-        throw new PlistBuildError("dates have no OpenStep representation; serialize the date as a string first", path);
+        throw new PlistBuildError("dates have no OpenStep representation, serialize the date as a string first", path);
       }
       if (value instanceof PlistUid) {
         throw new PlistBuildError("UIDs have no OpenStep representation", path);
