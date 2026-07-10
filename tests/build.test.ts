@@ -1,4 +1,4 @@
-import { buildPlist, parsePlist, PlistBuildError, type PlistValue } from "../src/index";
+import { buildPlist, parsePlist, PlistBuildError, PlistUid, type PlistValue } from "../src/index";
 
 const HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -216,5 +216,26 @@ describe("unrepresentable values", () => {
     dict.a = "x";
 
     expect(buildPlist(dict, { indent: false })).toContain("<dict><key>a</key><string>x</string></dict>");
+  });
+});
+
+describe("keyed-archive UIDs", () => {
+  test("writes a UID as the platform's CF$UID dictionary shape", () => {
+    expect(buildPlist(new PlistUid(7), { indent: false })).toContain(
+      "<dict><key>CF$UID</key><integer>7</integer></dict>",
+    );
+  });
+
+  test("round-trips UIDs losslessly", () => {
+    const value: PlistValue = { root: new PlistUid(1), objects: [new PlistUid(0), new PlistUid(4294967295)] };
+
+    expect(parsePlist(buildPlist(value))).toEqual(value);
+  });
+
+  test("rejects indexes a UID cannot hold", () => {
+    expect(() => new PlistUid(-1)).toThrow(RangeError);
+    expect(() => new PlistUid(2 ** 32)).toThrow(RangeError);
+    expect(() => new PlistUid(1.5)).toThrow(RangeError);
+    expect(() => new PlistUid(Number.NaN)).toThrow(RangeError);
   });
 });

@@ -28,7 +28,7 @@ import {
   PLIST_INTEGER_MIN,
 } from "./internal/integer-range";
 import { DEFAULT_MAX_DEPTH, type ParsePlistOptions } from "./parse-options";
-import type { PlistArray, PlistDictionary, PlistValue } from "./types";
+import { PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
 
 /** `bplist00` — the 8-byte magic every binary property list starts with. */
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
@@ -70,8 +70,8 @@ export function hasBinaryPlistMagic(bytes: Uint8Array): boolean {
  * `Uint8Array` — copies by default, or views into the input buffer with
  * {@link ParsePlistOptions.data | data: "view"} — dates become `Date`, and
  * integers follow the same 64-bit window and `number`/`bigint` split as the
- * XML parser. UID objects (used by keyed archives, not by plain property
- * lists) have no property list representation and are rejected.
+ * XML parser. UID objects (written by keyed archivers) become
+ * {@link PlistUid}.
  *
  * @param bytes The binary document. Only the view's window is read.
  * @param options See {@link ParsePlistOptions}.
@@ -270,7 +270,7 @@ class BinaryParser {
         value = this.parseUnicodeString(offset, objectInfo);
         break;
       case 0x8:
-        this.fail("UID objects have no property list representation", offset);
+        value = this.parseUid(offset, objectInfo);
         break;
       // A set (0xc) shares the array layout — count followed by object
       // references — and the platform tooling widens sets to arrays in XML too.
@@ -353,6 +353,21 @@ class BinaryParser {
       default:
         this.fail(`unsupported <real> width of ${byteCount} bytes`, offset);
     }
+  }
+
+  /**
+   * Resolves a UID object, the object-table reference a keyed archiver
+   * stores. The marker's low nibble is the payload byte count minus one.
+   * The platform reader accepts one to four payload bytes and refuses
+   * anything wider, which hand-assembled five- and eight-byte documents
+   * confirm, so this parser draws the same line.
+   */
+  private parseUid(offset: number, objectInfo: number): PlistUid {
+    const byteCount = objectInfo + 1;
+    if (byteCount > 4) {
+      this.fail(`unsupported UID width of ${byteCount} bytes`, offset);
+    }
+    return new PlistUid(this.readBigEndianUint(offset + 1, byteCount));
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   parseOpenStepPlist,
   parsePlist,
   PlistBuildError,
+  PlistUid,
   type PlistValue,
 } from "../src/index";
 
@@ -91,6 +92,7 @@ describe("the value model", () => {
     ["undefined in an array", ["a", undefined], "$[1]"],
     ["a nested number", { a: ["x", 1] }, "$.a[1]"],
     ["a class instance", new Map(), "$"],
+    ["a keyed-archive UID", new PlistUid(7), "$"],
   ])("rejects %s with its path", (_label, value, path) => {
     expect(() => buildOpenStepPlist(value as never)).toThrow(PlistBuildError);
     expect(() => buildOpenStepPlist(value as never)).toThrow(path);

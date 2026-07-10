@@ -35,7 +35,7 @@ import {
   TAB,
 } from "./internal/character-codes";
 import { PLIST_INTEGER_MAX, PLIST_INTEGER_MIN } from "./internal/integer-range";
-import type { PlistDictionary, PlistValue } from "./types";
+import { PlistUid, type PlistDictionary, type PlistValue } from "./types";
 
 /**
  * Options accepted by {@link buildPlist}.
@@ -220,10 +220,29 @@ class Builder {
 
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
+      // The UID test lives on this branch, which plain dictionaries never
+      // reach, so documents without UIDs pay nothing for the support.
+      if (value instanceof PlistUid) {
+        this.appendUid(value, depth);
+        return;
+      }
       throw new PlistBuildError("class instances have no property list representation", path);
     }
 
-    this.appendDict(value, path, depth);
+    // The prototype check above proves this is a plain object, which the
+    // narrowing cannot see because the UID branch returns inside it.
+    this.appendDict(value as PlistDictionary, path, depth);
+  }
+
+  /**
+   * Serializes a UID as the one-key `CF$UID` integer dictionary, the exact
+   * shape the platform writes for a UID in XML and reads back as one.
+   */
+  private appendUid(value: PlistUid, depth: number): void {
+    this.appendLine(depth, "<dict>");
+    this.appendLine(depth + 1, "<key>CF$UID</key>");
+    this.appendLine(depth + 1, `<integer>${value.uid}</integer>`);
+    this.appendLine(depth, "</dict>");
   }
 
   /**

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { buildPlist, parsePlist, type PlistValue } from "../src/index";
+import { buildPlist, parsePlist, PlistUid, type PlistValue } from "../src/index";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +24,7 @@ const RICH_VALUE: PlistValue = {
   emptyArray: [],
   dict: { inner: "value" },
   emptyDict: {},
+  uid: new PlistUid(3),
 };
 
 test("round-trips a document containing every value type", () => {

@@ -29,7 +29,7 @@ import {
   PLIST_INTEGER_MAX,
   PLIST_INTEGER_MIN,
 } from "./internal/integer-range";
-import type { PlistValue } from "./types";
+import { PlistUid, type PlistDictionary, type PlistValue } from "./types";
 
 /** `bplist00` — the 8-byte magic every binary property list starts with. */
 const MAGIC = [0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30] as const;
@@ -144,22 +144,34 @@ class BinaryBuilder {
   private readonly nodes: ObjectNode[] = [];
 
   /**
-   * Interned scalar indices, one map per scalar kind. Separate maps keyed by
-   * primitive values replace a single string-keyed map because building a
-   * canonical key string per scalar (`i:42`, `d:1751624430000`) allocated on
-   * every occurrence — including cache hits — and dominated dictionary-heavy
-   * builds.
-   *
-   * Integers within the safe-integer window key by `number`; only magnitudes
-   * beyond it key by `bigint` (each spelling of such a value converts
-   * exactly, so `42` and `42n` still intern to one object). The split keeps
-   * bigint allocation off the common lookup path.
+   * Interned `<string>` indices keyed by value. Every scalar kind below gets
+   * its own primitive-keyed map because a single map keyed by canonical
+   * strings (`i:42`, `d:1751624430000`) allocated a key string on every
+   * occurrence, cache hits included, and dominated dictionary-heavy builds.
    */
   private readonly stringIndex = new Map<string, number>();
+
+  /**
+   * Interned `<integer>` indices for values within the safe-integer window,
+   * keyed by `number` so the common lookup path never allocates a bigint.
+   */
   private readonly integerNumberIndex = new Map<number, number>();
+
+  /**
+   * Interned `<integer>` indices for magnitudes beyond the safe window.
+   * Either spelling of such a value converts exactly between `number` and
+   * `bigint`, so `42` and `42n` still intern to one object.
+   */
   private readonly integerBigIntIndex = new Map<bigint, number>();
+
+  /** Interned `<real>` indices keyed by value. */
   private readonly realIndex = new Map<number, number>();
+
+  /** Interned `<date>` indices keyed by epoch milliseconds. */
   private readonly dateIndex = new Map<number, number>();
+
+  /** Interned UID indices keyed by the archive object-table index. */
+  private readonly uidIndex = new Map<number, number>();
 
   /**
    * Interned `<data>` indices bucketed by payload length, for payloads small
@@ -329,9 +341,17 @@ class BinaryBuilder {
 
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) {
+      // The UID test lives on this branch, which plain dictionaries never
+      // reach, because testing it before the prototype check taxed every
+      // object and measured 27% on dictionary-heavy binary builds.
+      if (value instanceof PlistUid) {
+        return this.internUid(value.uid);
+      }
       throw new PlistBuildError("class instances have no property list representation", path);
     }
-    return this.internDict(value, path);
+    // The prototype check above proves this is a plain object, which the
+    // narrowing cannot see because the UID branch returns inside it.
+    return this.internDict(value as PlistDictionary, path);
   }
 
   /**
@@ -407,6 +427,22 @@ class BinaryBuilder {
     }
     const index = this.appendScalar([this.encodeInteger(value)]);
     this.integerBigIntIndex.set(value, index);
+    return index;
+  }
+
+  /**
+   * Interns a UID, deduplicating by value. The payload takes the smallest
+   * of one, two, or four bytes. The platform writer skips three-byte
+   * payloads the same way and its reader accepts nothing wider than four.
+   */
+  private internUid(uid: number): number {
+    const existing = this.uidIndex.get(uid);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const size = uid <= 0xff ? 1 : uid <= 0xff_ff ? 2 : 4;
+    const index = this.appendScalar([this.encodeIntBytes(0x80 | (size - 1), BigInt(uid), size)]);
+    this.uidIndex.set(uid, index);
     return index;
   }
 

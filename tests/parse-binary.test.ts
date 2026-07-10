@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
+  buildBinaryPlist,
   buildPlist,
   decodeBase64,
   parseBinaryPlist,
   parsePlist,
   PlistParseError,
+  PlistUid,
   type PlistArray,
   type PlistValue,
 } from "../src/index";
@@ -254,6 +256,35 @@ describe("shared object references", () => {
   });
 });
 
+describe("UID objects", () => {
+  test("parses one- to four-byte UID payloads", () => {
+    expect(parseBinaryPlist(singleObjectBinaryPlist([0x80, 0x05]))).toEqual(new PlistUid(5));
+    expect(parseBinaryPlist(singleObjectBinaryPlist([0x81, 0x01, 0x2c]))).toEqual(new PlistUid(300));
+    expect(parseBinaryPlist(singleObjectBinaryPlist([0x82, 0x01, 0x11, 0x70]))).toEqual(new PlistUid(70000));
+    expect(parseBinaryPlist(singleObjectBinaryPlist([0x83, 0xff, 0xff, 0xff, 0xff]))).toEqual(
+      new PlistUid(0xff_ff_ff_ff),
+    );
+  });
+
+  // CF rejects five- and eight-byte UID payloads (probed with hand-assembled
+  // documents), so widths past four are malformed rather than big values.
+  test("rejects UID payloads wider than four bytes", () => {
+    expect(() => parseBinaryPlist(singleObjectBinaryPlist([0x84, 0x01, 0, 0, 0, 0]))).toThrow(/UID width/u);
+    expect(() => parseBinaryPlist(singleObjectBinaryPlist([0x87, 0, 0, 0, 2, 0, 0, 0, 0]))).toThrow(/UID width/u);
+  });
+
+  test("deduplicates equal UIDs in built output", () => {
+    const built = buildBinaryPlist([new PlistUid(9), new PlistUid(9), new PlistUid(300)]);
+
+    expect(parseBinaryPlist(built)).toEqual([new PlistUid(9), new PlistUid(9), new PlistUid(300)]);
+    // The root array plus one object each for 9 and 300 makes three objects,
+    // where a writer without interning would emit four. numObjects is the
+    // big-endian u64 that starts 24 bytes before the end of the trailer.
+    const view = new DataView(built.buffer, built.byteOffset + built.byteLength - 24, 8);
+    expect(view.getUint32(4)).toBe(3);
+  });
+});
+
 describe("malformed binary input", () => {
   test("rejects a self-referential object graph via the depth limit", () => {
     // A single array object whose only element references itself (index 0).
@@ -376,6 +407,29 @@ describe.runIf(process.platform === "darwin")("plutil binary cross-validation", 
 
       expect(parseBinaryPlist(bytes)).toEqual(RICH_VALUE);
       expect(parsePlist(bytes)).toEqual(RICH_VALUE);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("round-trips UIDs through plutil in both directions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rork-plist-uid-"));
+    try {
+      const xmlPath = join(dir, "doc.plist");
+      const binPath = join(dir, "doc.bin");
+      // Our XML CF$UID rendering must convert into real UID markers, and
+      // plutil's binary output must parse back into the same PlistUids.
+      const value = { small: new PlistUid(5), wide: new PlistUid(70000), max: new PlistUid(0xff_ff_ff_ff) };
+      await writeFile(xmlPath, buildPlist(value));
+      await execFileAsync("plutil", ["-convert", "binary1", "-o", binPath, xmlPath]);
+      const { readFile } = await import("node:fs/promises");
+      const bytes = new Uint8Array(await readFile(binPath));
+
+      expect(parseBinaryPlist(bytes)).toEqual(value);
+      // Our own binary output must survive plutil's reading the same way.
+      await writeFile(binPath, buildBinaryPlist(value));
+      const { stdout } = await execFileAsync("plutil", ["-convert", "xml1", "-o", "-", binPath]);
+      expect(parsePlist(stdout)).toEqual(value);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

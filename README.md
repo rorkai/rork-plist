@@ -32,7 +32,7 @@ Property lists are the wire format of Apple's ecosystem — authentication excha
 
 `rork-plist` is designed for exactly that situation:
 
-- **Zero dependencies.** The plist grammar is a small, closed vocabulary defined by the [PropertyList-1.0 DTD](https://www.apple.com/DTDs/PropertyList-1.0.dtd). It does not need a general-purpose XML stack; a dedicated scanner is smaller, faster, and immune to entity-expansion attacks by construction. Binary plists decode straight from a `DataView` with no native addon or WASM blob.
+- **Zero dependencies.** The plist grammar is a small, closed vocabulary defined by the [PropertyList-1.0 DTD](https://www.apple.com/DTDs/PropertyList-1.0.dtd). It does not need a general-purpose XML stack. A dedicated scanner is smaller, faster, and immune to entity-expansion attacks by construction. Binary plists decode straight from a `DataView` with no native addon or WASM blob.
 - **One artifact, one code path.** A single ESM file with named exports. No environment-conditional entry points, no CommonJS default-export ambiguity, no reliance on ambient globals like `DOMParser` or `Buffer`. What you test locally is what runs in production, whatever the bundler.
 - **`Uint8Array` native.** `<data>` parses to `Uint8Array` and any `ArrayBufferView` serializes from exactly its view window — never its whole backing buffer, so subarray views into larger protocol buffers encode correctly.
 - **Loud failure modes.** Corrupt base64, malformed numbers, unbalanced markup, unrepresentable values — everything fails with a typed error carrying position (parse) or value-path (build) context. Payloads are never silently truncated or dropped.
@@ -80,7 +80,7 @@ All parsers accept the same options:
 | Option     | Default  | Description                                                                                                                                                                     |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`     | `"copy"` | How binary `<data>` payloads relate to the input buffer: `"copy"` gives payloads that own their memory; `"view"` gives `subarray` views that alias the input and skip the copy. |
-| `maxDepth` | `512`    | Maximum `<dict>`/`<array>` nesting before parsing fails; bounds stack growth and, for binary, caps reference cycles.                                                            |
+| `maxDepth` | `512`    | Maximum `<dict>`/`<array>` nesting before parsing fails. Bounds stack growth and, for binary, caps reference cycles.                                                            |
 
 Use `data: "view"` to pull fields out of a large document you control and will not mutate — parsing a data-heavy document this way runs at the cost of the scan alone, with zero payload copying. The default stays `"copy"` because views cut both ways: writing through one corrupts the source bytes, and retaining one keeps the entire input buffer alive.
 
@@ -147,12 +147,15 @@ The mapping is identical for XML and binary input. `Date` values keep millisecon
 | `<data>`              | `Uint8Array`                                           |
 | `<array>`             | `PlistValue[]`                                         |
 | `<dict>`              | plain object, keys in document order                   |
+| UID                   | `PlistUid`                                             |
+
+UIDs are the object-table references NSKeyedArchiver writes. XML has no UID element, so a UID renders as a dictionary holding a single `CF$UID` integer — the platform's own representation — and exactly that shape parses back as a `PlistUid`. A `CF$UID` dictionary with extra keys, a non-integer value, or an index outside 32 bits stays an ordinary dictionary. The platform coerces and wraps such values when it reads them, silently corrupting the index, and this library refuses to do that.
 
 ## Behavior notes
 
-Parsing follows the grammar accepted by Apple's own tooling; the test suite cross-validates generated and parsed documents against the platform plist utility on macOS. Beyond the fixtures, `pnpm corpus` sweeps the local machine's real property lists — tens of thousands of system, framework, and application files from bytes to tens of megabytes — parsing every one and cross-validating a stratified sample against `plutil` value by value.
+Parsing follows the grammar accepted by Apple's own tooling, and the test suite cross-validates generated and parsed documents against the platform plist utility on macOS. Beyond the fixtures, `pnpm corpus` sweeps the local machine's real property lists — tens of thousands of system, framework, and application files from bytes to tens of megabytes — parsing every one and cross-validating a stratified sample against `plutil` value by value.
 
-- **Binary plists** (`bplist00`) are supported both ways: `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), and `buildBinaryPlist` emits binary while `buildPlist` emits XML. On read, UID objects (used by keyed archives, not plain property lists) are rejected and sets are widened to arrays, matching the platform tooling; an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
+- **Binary plists** (`bplist00`) are supported in both directions. `parsePlist` auto-detects the format from a buffer (or use `parseBinaryPlist`), `buildBinaryPlist` emits binary, and `buildPlist` emits XML. On read, UID objects parse as `PlistUid` so NSKeyedArchiver documents work, sets are widened to arrays like the platform tooling does, and an object referenced from several places resolves to one shared instance, as the reference reader does. On write, dates keep millisecond precision and are not limited to four-digit years, unlike the XML text format.
 
 - **OpenStep plists** — the format of Xcode's `project.pbxproj` and of `.strings` localization files — parse via `parsePlist` or `parseOpenStepPlist` and build via `buildOpenStepPlist`. The parsing grammar follows the reference parser, probed case by case: single- and double-quoted strings, the C escape set, octal escapes mapped through the NeXTSTEP encoding, raw `\U` code units, non-nesting comments, whitespace-separated hex data groups, the bare-key `"key";` shorthand, and brace-less strings-file documents. The format is untyped, so leaves parse as strings or data, and the writer accepts exactly that value model — typed values are rejected rather than silently stringified. The platform tooling cannot write OpenStep at all, so written output is verified by acceptance: it parses identically through this library and the platform parser.
 
@@ -203,14 +206,14 @@ Binary reads beat XML reads because object lengths are explicit — nothing is s
 
 ### Key performance features
 
-- **Single pass, no intermediate representation** — documents scan directly into values; there is no DOM, token stream, or event tree to build and then walk.
+- **Single pass, no intermediate representation** — documents scan directly into values, with no DOM, token stream, or event tree to build and then walk.
 - **Zero allocations per element** — the ten element names match against interned constants by code-unit comparison, so tag-dense documents produce no per-tag garbage.
 - **Precomputed lookup tables** — base64 decodes through a 128-entry reverse table, and character classification never round-trips through strings.
 - **Native fast paths, portable fallbacks** — base64 uses the host codec where one exists, strings that need no escaping pass through after a single native scan, and common integers convert without arbitrary-precision handling. Every fast path has a pure-JavaScript fallback with identical observable behavior.
 
 ## Development
 
-The published artifact runs on Node 20+; working on the repository needs Node 22.18+ (declared in `devEngines`), where the build toolchain is supported and the benchmarks run TypeScript through Node's native type stripping.
+The published artifact runs on Node 20+. Working on the repository needs Node 22.18+ (declared in `devEngines`), where the build toolchain is supported and the benchmarks run TypeScript through Node's native type stripping.
 
 ```sh
 pnpm install
@@ -230,7 +233,7 @@ one module per concern (`parse`, `build`, `base64`, `errors`, `types`),
 shared non-exported helpers live in `src/internal/`, tests live in `tests/`
 and exercise the public entry point, and benchmarks live in `bench/`.
 
-CI runs the same `pnpm checks` gate on Linux and macOS; the macOS jobs
+CI runs the same `pnpm checks` gate on Linux and macOS, and the macOS jobs
 include the plutil cross-validation suite.
 
 ## Releasing
