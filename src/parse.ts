@@ -65,7 +65,7 @@ import {
 import { hasBinaryPlistMagic, parseBinaryPlist } from "./parse-binary";
 import { parseOpenStepPlist } from "./parse-openstep";
 import { DEFAULT_MAX_DEPTH, type ParsePlistOptions } from "./parse-options";
-import { PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
+import { isPlistDictionary, PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
 
 export type { ParsePlistOptions } from "./parse-options";
 
@@ -315,10 +315,7 @@ export function parsePlist(input: string | Uint8Array, options: ParsePlistOption
  * means XML was intended.
  */
 function parseText(text: string, options: ParsePlistOptions): PlistValue {
-  let sniff = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-  while (sniff < text.length && isWhitespaceCode(text.charCodeAt(sniff))) {
-    sniff++;
-  }
+  const sniff = significantOffset(text);
   if (text.charCodeAt(sniff) !== LESS_THAN) {
     return parseOpenStepPlist(text, options);
   }
@@ -342,9 +339,96 @@ function parseText(text: string, options: ParsePlistOptions): PlistValue {
   }
 }
 
+/**
+ * Finds the offset of the first significant character, past an optional
+ * byte order mark and leading whitespace. That character decides the text
+ * grammar, so {@link parseText} and {@link detectPlistFormat} both read it
+ * from here and cannot disagree.
+ */
+function significantOffset(text: string): number {
+  let offset = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  while (offset < text.length && isWhitespaceCode(text.charCodeAt(offset))) {
+    offset++;
+  }
+  return offset;
+}
+
 /** Parses an XML property list string; the XML path of {@link parseText}. */
 function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
   return new Parser(xml, options.maxDepth ?? DEFAULT_MAX_DEPTH).parseDocument();
+}
+
+/**
+ * A property list serialization format, as {@link detectPlistFormat}
+ * classifies it and as the `build*` functions produce it.
+ */
+export type PlistFormat = "binary" | "xml" | "openstep";
+
+/**
+ * Reports the format {@link parsePlist} would read `input` as, without
+ * parsing it.
+ *
+ * A buffer carrying the `bplist00` magic is `"binary"`. Anything else is
+ * decoded as text the way {@link parsePlist} decodes it — UTF-8, or UTF-16
+ * when a byte order mark announces it — and classifies as `"xml"` when the
+ * first significant character is `<` and `"openstep"` otherwise.
+ *
+ * The intended use is rewriting a document while preserving its on-disk
+ * format. Detect the format, parse, modify, and hand the value to the
+ * matching builder, so a binary document does not silently come back as XML.
+ *
+ * Detection reads only the leading bytes, so it cannot see the one deep
+ * dispatch case {@link parsePlist} resolves by parsing: markup-shaped text
+ * that fails as XML but reads as an OpenStep root data literal, such as
+ * `<0fbd77>`, reports `"xml"` here. Such documents are data-rooted, so this
+ * does not affect the rewrite pattern above, which operates on
+ * dictionary-rooted files.
+ *
+ * @param input Document text, or a buffer holding any plist format.
+ * @returns The classification of `input`.
+ * @throws PlistParseError when a buffer is neither binary nor decodable
+ *   text, the same error {@link parsePlist} raises for such input.
+ */
+export function detectPlistFormat(input: string | Uint8Array): PlistFormat {
+  if (typeof input !== "string") {
+    if (hasBinaryPlistMagic(input)) {
+      return "binary";
+    }
+    return detectTextFormat(decodeTextBytes(input));
+  }
+  return detectTextFormat(input);
+}
+
+/** The text path of {@link detectPlistFormat}. */
+function detectTextFormat(text: string): PlistFormat {
+  return text.charCodeAt(significantOffset(text)) === LESS_THAN ? "xml" : "openstep";
+}
+
+/**
+ * Parses a property list and requires the root to be a dictionary.
+ *
+ * Most documents this library meets in practice — app metadata, exported
+ * settings, entitlements, provisioning payloads — are dictionary-rooted by
+ * contract, and every consumer of {@link parsePlist} otherwise repeats the
+ * same narrowing before touching keys. This entry point returns the typed
+ * dictionary directly and accepts the same inputs and options as
+ * {@link parsePlist}.
+ *
+ * @param input Source of the document — text, or a buffer holding any plist
+ *   format.
+ * @param options See {@link ParsePlistOptions}.
+ * @returns The document's root dictionary.
+ * @throws PlistParseError when the document is malformed, and also when it
+ *   is well formed but its root is any other shape, including a
+ *   keyed-archive UID, which parses as {@link PlistUid} rather than as the
+ *   one-key dictionary that encodes it.
+ */
+export function parsePlistDictionary(input: string | Uint8Array, options: ParsePlistOptions = {}): PlistDictionary {
+  const value = parsePlist(input, options);
+  if (!isPlistDictionary(value)) {
+    throw new PlistParseError("the document root is not a dictionary", input, 0);
+  }
+  return value;
 }
 
 /**

@@ -67,6 +67,17 @@ try {
 }
 ```
 
+### `parsePlistDictionary(input, options?)`
+
+Parses a property list and requires the root to be a dictionary, returning it as `PlistDictionary`. Most documents in practice — app metadata, exported settings, entitlements, provisioning payloads — are dictionary-rooted by contract, and this entry point removes the narrowing every such caller would otherwise repeat. It accepts the same inputs and options as `parsePlist` and throws `PlistParseError` when the root is any other shape, including a keyed-archive UID, which parses as `PlistUid` rather than as the one-key dictionary that encodes it.
+
+```ts
+import { parsePlistDictionary } from "rork-plist";
+
+const info = parsePlistDictionary(await readFile("Info.plist"));
+const bundleId = info["CFBundleIdentifier"];
+```
+
 ### `parseBinaryPlist(bytes, options?)`
 
 Parses a binary (`bplist00`) property list explicitly, skipping the format sniffing `parsePlist` does. Use it when you already know the input is binary; otherwise `parsePlist` handles every format.
@@ -83,6 +94,21 @@ All parsers accept the same options:
 | `maxDepth` | `512`    | Maximum `<dict>`/`<array>` nesting before parsing fails. Bounds stack growth and, for binary, caps reference cycles.                                                            |
 
 Use `data: "view"` to pull fields out of a large document you control and will not mutate — parsing a data-heavy document this way runs at the cost of the scan alone, with zero payload copying. The default stays `"copy"` because views cut both ways: writing through one corrupts the source bytes, and retaining one keeps the entire input buffer alive.
+
+### `detectPlistFormat(input)`
+
+Reports which format `parsePlist` would read the input as — `"binary"`, `"xml"`, or `"openstep"` — without parsing it. The classification uses the same magic and encoding checks as the parser, so the two cannot disagree. The intended use is rewriting a document while preserving its on-disk format, so a binary document does not silently come back as XML.
+
+```ts
+import { buildBinaryPlist, buildPlist, detectPlistFormat, parsePlistDictionary } from "rork-plist";
+
+const source = await readFile("Info.plist");
+const info = parsePlistDictionary(source);
+info["CFBundleIdentifier"] = "com.example.rebranded";
+const rebuilt = detectPlistFormat(source) === "binary" ? buildBinaryPlist(info) : buildPlist(info);
+```
+
+Detection reads only the leading bytes, so markup-shaped text that would fail as XML and fall back to an OpenStep root data literal, such as `<0fbd77>`, reports `"xml"`. Such documents are data-rooted and outside the rewrite pattern above.
 
 ### `buildPlist(value, options?)`
 
@@ -125,6 +151,19 @@ import { buildOpenStepPlist, parseOpenStepPlist } from "rork-plist";
 const project = parseOpenStepPlist(await readFile("project.pbxproj", "utf8")) as Record<string, unknown>;
 project["archiveVersion"] = "2";
 await writeFile("project.pbxproj", buildOpenStepPlist(project));
+```
+
+### `isPlistDictionary(value)`
+
+A type guard that narrows a `PlistValue` to `PlistDictionary`. The guard rules out every other object shape in the value model, including `PlistUid`, and lives in the library so it evolves together with the union — a caller-side shape test keeps compiling after the union grows and then quietly misclassifies the new shape. `null` and `undefined` are accepted so an optional dictionary member can be narrowed directly.
+
+```ts
+import { isPlistDictionary, parsePlist } from "rork-plist";
+
+const value = parsePlist(bytes);
+if (isPlistDictionary(value) && isPlistDictionary(value["Entitlements"])) {
+  const teamId = value["Entitlements"]["com.apple.developer.team-identifier"];
+}
 ```
 
 ### `encodeBase64(bytes)` / `decodeBase64(text)`

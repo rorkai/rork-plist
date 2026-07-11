@@ -1,4 +1,11 @@
-import { parsePlist, PlistParseError, PlistUid } from "../src/index";
+import {
+  buildBinaryPlist,
+  detectPlistFormat,
+  parsePlist,
+  parsePlistDictionary,
+  PlistParseError,
+  PlistUid,
+} from "../src/index";
 
 const HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -339,4 +346,62 @@ test("reports line and column positions in errors", () => {
     expect(error.position.column).toBe(2);
     expect(error.message).toContain("line 4");
   }
+});
+
+test("parses a dictionary-rooted document through parsePlistDictionary", () => {
+  const value = parsePlistDictionary('<plist version="1.0"><dict><key>name</key><string>Rork</string></dict></plist>');
+
+  expect(value).toEqual({ name: "Rork" });
+});
+
+test("parses binary and OpenStep dictionary roots through parsePlistDictionary", () => {
+  expect(parsePlistDictionary(buildBinaryPlist({ device: "iPhone17,1" }))).toEqual({ device: "iPhone17,1" });
+  expect(parsePlistDictionary("{ name = Rork; }")).toEqual({ name: "Rork" });
+});
+
+test("forwards parse options through parsePlistDictionary", () => {
+  expect(() => parsePlistDictionary("<dict><key>a</key><array><array/></array></dict>", { maxDepth: 1 })).toThrow(
+    PlistParseError,
+  );
+});
+
+test("rejects well-formed documents whose root is not a dictionary", () => {
+  expect(() => parsePlistDictionary("<array><string>x</string></array>")).toThrow(
+    /the document root is not a dictionary/u,
+  );
+  expect(() => parsePlistDictionary("<string>x</string>")).toThrow(PlistParseError);
+  // The canonical CF$UID shape parses as a PlistUid object, so it must be
+  // rejected even though the document text looks like a dictionary.
+  expect(() => parsePlistDictionary("<dict><key>CF$UID</key><integer>3</integer></dict>")).toThrow(PlistParseError);
+});
+
+test("detects the format of buffers and text", () => {
+  expect(detectPlistFormat(buildBinaryPlist({ a: 1 }))).toBe("binary");
+  expect(detectPlistFormat('<plist version="1.0"><dict/></plist>')).toBe("xml");
+  expect(detectPlistFormat(new TextEncoder().encode("  \n<dict/>"))).toBe("xml");
+  expect(detectPlistFormat("{ a = 1; }")).toBe("openstep");
+  expect(detectPlistFormat(new TextEncoder().encode('{ a = "b"; }'))).toBe("openstep");
+});
+
+test("detects XML behind a byte order mark the way parsePlist decodes it", () => {
+  // UTF-16LE bytes of "<dict/>" behind the FF FE mark. Detection must run
+  // the same decoding as parsePlist or the two would classify differently.
+  const utf16 = Buffer.from("\uFEFF<dict/>", "utf16le");
+
+  expect(detectPlistFormat(new Uint8Array(utf16))).toBe("xml");
+  expect(detectPlistFormat("\uFEFF  <dict/>")).toBe("xml");
+});
+
+test("classifies markup-shaped OpenStep data roots as xml", () => {
+  // Documented shallow-detection corner. parsePlist reads this as an
+  // OpenStep data literal after XML parsing fails, but detection stops at
+  // the leading "<". Data-rooted documents are outside the rewrite pattern
+  // detection exists for, so the shallow answer is acceptable and cemented
+  // here.
+  expect(detectPlistFormat("<0fbd77>")).toBe("xml");
+  expect(parsePlist("<0fbd77>")).toEqual(new Uint8Array([0x0f, 0xbd, 0x77]));
+});
+
+test("raises the parse error for undecodable detection input", () => {
+  expect(() => detectPlistFormat(new Uint8Array([0xff, 0xff, 0xff]))).toThrow(PlistParseError);
 });
