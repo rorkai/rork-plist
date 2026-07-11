@@ -20,6 +20,12 @@ test("builds each format and parses back to the same value", () => {
   expect(() => buildPlistAs(value, "openstep")).toThrow(/no OpenStep representation/u);
 });
 
+test("rejects unknown formats for callers outside the type system", () => {
+  const format = "yaml" as unknown as "xml";
+
+  expect(() => buildPlistAs({ a: "b" }, format)).toThrow(/unknown property list format "yaml"/u);
+});
+
 test("rebuilds a document in its detected source format", () => {
   // The composition this entry point exists for. A binary source must come
   // back binary after a read-modify-write pass, never silently as XML.

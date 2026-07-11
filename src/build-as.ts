@@ -39,6 +39,8 @@ import type { PlistFormat, PlistValue } from "./types";
  * @returns The serialized document, typed by `format`.
  * @throws PlistBuildError when the value cannot be represented, the same
  *   errors the format's builder raises.
+ * @throws TypeError when `format` is not a known format, which the type
+ *   system cannot rule out for JavaScript callers.
  */
 export function buildPlistAs(value: PlistValue, format: "binary"): Uint8Array;
 export function buildPlistAs(value: PlistValue, format: "xml" | "openstep"): string;
@@ -51,5 +53,11 @@ export function buildPlistAs(value: PlistValue, format: PlistFormat): string | U
       return buildPlist(value);
     case "openstep":
       return buildOpenStepPlist(value);
+    default: {
+      // The satisfies check keeps the switch exhaustive at compile time
+      // while the throw covers JavaScript callers the compiler cannot see.
+      format satisfies never;
+      throw new TypeError(`unknown property list format ${JSON.stringify(format)}`);
+    }
   }
 }
