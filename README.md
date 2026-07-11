@@ -97,16 +97,15 @@ Use `data: "view"` to pull fields out of a large document you control and will n
 
 ### `detectPlistFormat(input)`
 
-Reports which format `parsePlist` would read the input as — `"binary"`, `"xml"`, or `"openstep"` — without parsing it. The classification uses the same magic and encoding checks as the parser, so the two cannot disagree. The intended use is rewriting a document while preserving its on-disk format, so a binary document does not silently come back as XML.
+Reports which format `parsePlist` would read the input as — `"binary"`, `"xml"`, or `"openstep"` — without parsing it. The classification uses the same magic and encoding checks as the parser, so the two cannot disagree. The intended use is rewriting a document while preserving its on-disk format, so a binary document does not silently come back as XML:
 
 ```ts
-import { buildBinaryPlist, buildOpenStepPlist, buildPlist, detectPlistFormat, parsePlistDictionary } from "rork-plist";
+import { buildPlistAs, detectPlistFormat, parsePlistDictionary } from "rork-plist";
 
 const source = await readFile("Info.plist");
 const info = parsePlistDictionary(source);
 info["CFBundleIdentifier"] = "com.example.rebranded";
-const builders = { binary: buildBinaryPlist, xml: buildPlist, openstep: buildOpenStepPlist };
-const rebuilt = builders[detectPlistFormat(source)](info);
+await writeFile("Info.plist", buildPlistAs(info, detectPlistFormat(source)));
 ```
 
 Detection reads only the leading bytes, so markup-shaped text that would fail as XML and fall back to an OpenStep root data literal, such as `<0fbd77>`, reports `"xml"`. Such documents are data-rooted and outside the rewrite pattern above.
@@ -153,6 +152,10 @@ const project = parseOpenStepPlist(await readFile("project.pbxproj", "utf8")) as
 project["archiveVersion"] = "2";
 await writeFile("project.pbxproj", buildOpenStepPlist(project));
 ```
+
+### `buildPlistAs(value, format)`
+
+Serializes a value in the given `PlistFormat` — the format-parametrized counterpart of the three builders above, for code that learns the target format at runtime, most commonly from `detectPlistFormat` when rewriting an existing document. The return type follows the format: `Uint8Array` for `"binary"`, a document string for `"xml"` and `"openstep"`, and their union when the format is only known at runtime. Each format builds with its defaults; a caller that needs format-specific options keeps using that format's builder directly.
 
 ### `isPlistDictionary(value)`
 

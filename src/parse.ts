@@ -65,7 +65,14 @@ import {
 import { hasBinaryPlistMagic, parseBinaryPlist } from "./parse-binary";
 import { parseOpenStepPlist } from "./parse-openstep";
 import { DEFAULT_MAX_DEPTH, type ParsePlistOptions } from "./parse-options";
-import { isPlistDictionary, PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
+import {
+  isPlistDictionary,
+  PlistUid,
+  type PlistArray,
+  type PlistDictionary,
+  type PlistFormat,
+  type PlistValue,
+} from "./types";
 
 export type { ParsePlistOptions } from "./parse-options";
 
@@ -357,12 +364,6 @@ function significantOffset(text: string): number {
 function parseXml(xml: string, options: ParsePlistOptions): PlistValue {
   return new Parser(xml, options.maxDepth ?? DEFAULT_MAX_DEPTH).parseDocument();
 }
-
-/**
- * A property list serialization format, as {@link detectPlistFormat}
- * classifies it and as the `build*` functions produce it.
- */
-export type PlistFormat = "binary" | "xml" | "openstep";
 
 /**
  * Reports the format {@link parsePlist} would read `input` as, without

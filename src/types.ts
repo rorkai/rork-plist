@@ -98,6 +98,12 @@ export interface PlistDictionary {
 }
 
 /**
+ * A property list serialization format, as {@link detectPlistFormat}
+ * classifies documents and {@link buildPlistAs} selects builders.
+ */
+export type PlistFormat = "binary" | "xml" | "openstep";
+
+/**
  * Narrows a property list value to a dictionary.
  *
  * The guard rules out every other object shape in the value model, including
