@@ -100,12 +100,13 @@ Use `data: "view"` to pull fields out of a large document you control and will n
 Reports which format `parsePlist` would read the input as — `"binary"`, `"xml"`, or `"openstep"` — without parsing it. The classification uses the same magic and encoding checks as the parser, so the two cannot disagree. The intended use is rewriting a document while preserving its on-disk format, so a binary document does not silently come back as XML.
 
 ```ts
-import { buildBinaryPlist, buildPlist, detectPlistFormat, parsePlistDictionary } from "rork-plist";
+import { buildBinaryPlist, buildOpenStepPlist, buildPlist, detectPlistFormat, parsePlistDictionary } from "rork-plist";
 
 const source = await readFile("Info.plist");
 const info = parsePlistDictionary(source);
 info["CFBundleIdentifier"] = "com.example.rebranded";
-const rebuilt = detectPlistFormat(source) === "binary" ? buildBinaryPlist(info) : buildPlist(info);
+const builders = { binary: buildBinaryPlist, xml: buildPlist, openstep: buildOpenStepPlist };
+const rebuilt = builders[detectPlistFormat(source)](info);
 ```
 
 Detection reads only the leading bytes, so markup-shaped text that would fail as XML and fall back to an OpenStep root data literal, such as `<0fbd77>`, reports `"xml"`. Such documents are data-rooted and outside the rewrite pattern above.
