@@ -99,7 +99,7 @@ export interface PlistDictionary {
 
 /**
  * A property list serialization format, as {@link detectPlistFormat}
- * classifies documents and {@link buildPlistAs} selects builders.
+ * classifies documents and {@link buildPlist} selects builders.
  */
 export type PlistFormat = "binary" | "xml" | "openstep";
 

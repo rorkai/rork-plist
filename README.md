@@ -82,6 +82,10 @@ const bundleId = info["CFBundleIdentifier"];
 
 Parses a binary (`bplist00`) property list explicitly, skipping the format sniffing `parsePlist` does. Use it when you already know the input is binary; otherwise `parsePlist` handles every format.
 
+### `parseXmlPlist(text, options?)`
+
+Parses an XML property list explicitly, with no format dispatch. `parsePlist` routes markup-shaped text here but falls back to the OpenStep grammar when XML parsing fails and the text could be a root-level OpenStep data literal (the way the platform tooling reads `<0fbd77>`); this entry point never falls back, so a document that must be XML fails with the XML error.
+
 ### `parseOpenStepPlist(text, options?)`
 
 Parses an OpenStep (NeXTSTEP) text property list explicitly — the legacy format of Xcode's `project.pbxproj` and `.strings` localization files. The format is untyped, so leaves parse as strings (quoted or bare) or `Uint8Array` (`<hex>` data); strings-file documents, including the bare `"key";` shorthand, parse as dictionaries.
@@ -100,34 +104,40 @@ Use `data: "view"` to pull fields out of a large document you control and will n
 Reports which format `parsePlist` would read the input as — `"binary"`, `"xml"`, or `"openstep"` — without parsing it. The classification uses the same magic and encoding checks as the parser, so the two cannot disagree. The intended use is rewriting a document while preserving its on-disk format, so a binary document does not silently come back as XML:
 
 ```ts
-import { buildPlistAs, detectPlistFormat, parsePlistDictionary } from "rork-plist";
+import { buildPlist, detectPlistFormat, parsePlistDictionary } from "rork-plist";
 
 const source = await readFile("Info.plist");
 const info = parsePlistDictionary(source);
 info["CFBundleIdentifier"] = "com.example.rebranded";
-await writeFile("Info.plist", buildPlistAs(info, detectPlistFormat(source)));
+await writeFile("Info.plist", buildPlist(info, { format: detectPlistFormat(source) }));
 ```
 
 Detection reads only the leading bytes, so markup-shaped text that would fail as XML and fall back to an OpenStep root data literal, such as `<0fbd77>`, reports `"xml"`. Such documents are data-rooted and outside the rewrite pattern above.
 
 ### `buildPlist(value, options?)`
 
-Serializes a value as a complete XML property list document.
+Serializes a value as a property list in the chosen format, mirroring `parsePlist` as the generic entry point. The parser detects the format from the input; a value carries nothing to detect, so the builder takes the format as an option instead, defaulting to `"xml"`. The return type follows the format — `Uint8Array` for `"binary"`, a document string for the text formats — and collapses to `string | Uint8Array` when the format is only known at runtime.
 
 ```ts
 import { buildPlist, PlistBuildError } from "rork-plist";
 
-buildPlist({ token: new Uint8Array([1, 2, 254]) });
-buildPlist(largeDocument, { indent: false }); // single-line body
+buildPlist({ token: new Uint8Array([1, 2, 254]) }); // XML document
+buildPlist(largeDocument, { indent: false }); // single-line XML body
+buildPlist(archive, { format: "binary" }); // bplist00 bytes
 ```
 
 Options:
 
-| Option   | Default | Description                                          |
-| -------- | ------- | ---------------------------------------------------- |
-| `indent` | `"\t"`  | Indentation unit, or `false` for a single-line body. |
+| Option   | Default | Description                                                                                       |
+| -------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `format` | `"xml"` | The serialization format: `"xml"`, `"binary"`, or `"openstep"`.                                   |
+| `indent` | `"\t"`  | Indentation unit for the text formats, or `false` for a single-line body. Binary has no layout.   |
 
-A dictionary key whose value is `undefined` is omitted, matching `JSON.stringify`, so optional and conditionally-set fields need no manual stripping. `PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value otherwise has no property list representation: `null`, `undefined` outside a dictionary value (a root or array `undefined`, since dropping an array element would shift indices), functions, class instances, `NaN`, infinities, lone surrogates, or characters XML 1.0 cannot carry.
+A dictionary key whose value is `undefined` is omitted, matching `JSON.stringify`, so optional and conditionally-set fields need no manual stripping. `PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value has no representation in the chosen format — see each format's builder below for its specific restrictions.
+
+### `buildXmlPlist(value, options?)`
+
+Serializes a value as a complete XML property list document explicitly, with no format dispatch — the XML path of `buildPlist`. The builder emits the reference writer's document layout (XML declaration, DOCTYPE, `<plist version="1.0">` wrapper, one indentation unit per nesting level), so generated documents diff cleanly against platform tool output. Values with no XML representation — `null`, `undefined` outside a dictionary value (a root or array `undefined`, since dropping an array element would shift indices), functions, class instances, `NaN`, infinities, lone surrogates, or characters XML 1.0 cannot carry — raise `PlistBuildError`.
 
 ### `buildBinaryPlist(value)`
 
@@ -152,10 +162,6 @@ const project = parseOpenStepPlist(await readFile("project.pbxproj", "utf8")) as
 project["archiveVersion"] = "2";
 await writeFile("project.pbxproj", buildOpenStepPlist(project));
 ```
-
-### `buildPlistAs(value, format)`
-
-Serializes a value in the given `PlistFormat` — the format-parametrized counterpart of the three builders above, for code that learns the target format at runtime, most commonly from `detectPlistFormat` when rewriting an existing document. The return type follows the format: `Uint8Array` for `"binary"`, a document string for `"xml"` and `"openstep"`, and their union when the format is only known at runtime. Each format builds with its defaults; a caller that needs format-specific options keeps using that format's builder directly.
 
 ### `isPlistDictionary(value)`
 
