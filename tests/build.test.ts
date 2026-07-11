@@ -1,4 +1,14 @@
-import { buildPlist, parsePlist, PlistBuildError, PlistUid, type PlistValue } from "../src/index";
+import {
+  buildOpenStepPlist,
+  buildPlist,
+  buildXmlPlist,
+  detectPlistFormat,
+  parsePlist,
+  parsePlistDictionary,
+  PlistBuildError,
+  PlistUid,
+  type PlistValue,
+} from "../src/index";
 
 const HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -216,6 +226,59 @@ describe("unrepresentable values", () => {
     dict.a = "x";
 
     expect(buildPlist(dict, { indent: false })).toContain("<dict><key>a</key><string>x</string></dict>");
+  });
+});
+
+describe("format selection", () => {
+  test("builds XML by default and through the explicit format", () => {
+    const value = { name: "Rork", count: 42, enabled: true };
+
+    expect(buildPlist(value)).toBe(buildXmlPlist(value));
+    expect(buildPlist(value, { format: "xml" })).toBe(buildXmlPlist(value));
+    expect(buildPlist(value, { indent: false })).toBe(buildXmlPlist(value, { indent: false }));
+  });
+
+  test("builds each format and parses back to the same value", () => {
+    const value = { name: "Rork", count: 42, enabled: true };
+
+    const binary = buildPlist(value, { format: "binary" });
+    expect(binary).toBeInstanceOf(Uint8Array);
+    expect(parsePlist(binary)).toEqual(value);
+
+    // OpenStep is untyped and accepts only its own value model, so the
+    // dispatcher must surface the format's stricter rules unchanged.
+    const untyped = { name: "Rork" };
+    const openstep = buildPlist(untyped, { format: "openstep" });
+    expect(openstep).toContain("=");
+    expect(parsePlist(openstep)).toEqual(untyped);
+    expect(() => buildPlist(value, { format: "openstep" })).toThrow(/no OpenStep representation/u);
+  });
+
+  test("forwards indentation to the text formats", () => {
+    const value = { name: "Rork" };
+
+    expect(buildPlist(value, { format: "openstep", indent: false })).toBe(buildOpenStepPlist(value, { indent: false }));
+    expect(buildPlist(value, { format: "binary", indent: false })).toBeInstanceOf(Uint8Array);
+  });
+
+  test("rejects unknown formats for callers outside the type system", () => {
+    const format = "yaml" as unknown as "xml";
+
+    expect(() => buildPlist({ a: "b" }, { format })).toThrow(/unknown property list format "yaml"/u);
+  });
+
+  test("rebuilds a document in its detected source format", () => {
+    // The composition the format option exists for. A binary source must
+    // come back binary after a read-modify-write pass, never silently as
+    // XML.
+    const source = buildPlist({ CFBundleIdentifier: "com.example.original" }, { format: "binary" });
+
+    const info = parsePlistDictionary(source);
+    info["CFBundleIdentifier"] = "com.example.rebranded";
+    const rebuilt = buildPlist(info, { format: detectPlistFormat(source) });
+
+    expect(detectPlistFormat(rebuilt)).toBe("binary");
+    expect(parsePlistDictionary(rebuilt)).toEqual({ CFBundleIdentifier: "com.example.rebranded" });
   });
 });
 

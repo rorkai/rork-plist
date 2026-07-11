@@ -16,12 +16,21 @@
  */
 
 export { decodeBase64, encodeBase64 } from "./base64";
+export { buildPlist, type BuildPlistOptions } from "./build";
 export { buildBinaryPlist } from "./build-binary";
 export { buildOpenStepPlist, type BuildOpenStepPlistOptions } from "./build-openstep";
-export { buildPlist, type BuildPlistOptions } from "./build";
+export { buildXmlPlist, type BuildXmlPlistOptions } from "./build-xml";
 export { PlistBuildError, PlistParseError, type PlistErrorPosition } from "./errors";
-export { parsePlist } from "./parse";
+export { detectPlistFormat, parsePlist, parsePlistDictionary } from "./parse";
 export { parseBinaryPlist } from "./parse-binary";
 export { parseOpenStepPlist } from "./parse-openstep";
 export type { ParsePlistOptions } from "./parse-options";
-export { PlistUid, type PlistArray, type PlistDictionary, type PlistValue } from "./types";
+export { parseXmlPlist } from "./parse-xml";
+export {
+  isPlistDictionary,
+  PlistUid,
+  type PlistArray,
+  type PlistDictionary,
+  type PlistFormat,
+  type PlistValue,
+} from "./types";

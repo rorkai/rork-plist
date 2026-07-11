@@ -96,3 +96,34 @@ export interface PlistArray extends Array<PlistValue> {}
 export interface PlistDictionary {
   [key: string]: PlistValue;
 }
+
+/**
+ * A property list serialization format, as {@link detectPlistFormat}
+ * classifies documents and {@link buildPlist} selects builders.
+ */
+export type PlistFormat = "binary" | "xml" | "openstep";
+
+/**
+ * Narrows a property list value to a dictionary.
+ *
+ * The guard rules out every other object shape in the value model, including
+ * {@link PlistUid}, which is an object but not a dictionary. It lives in the
+ * library so it evolves together with {@link PlistValue}. A caller-side
+ * shape test written against an older union keeps compiling after the union
+ * grows and then quietly misclassifies the new shape, which is exactly what
+ * would have happened to a pre-UID guard once UIDs started parsing as
+ * `PlistUid` objects.
+ *
+ * `null` and `undefined` are accepted so optional lookups, such as a
+ * dictionary member that may be absent, can be narrowed directly.
+ */
+export function isPlistDictionary(value: PlistValue | null | undefined): value is PlistDictionary {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Uint8Array) &&
+    !(value instanceof Date) &&
+    !(value instanceof PlistUid)
+  );
+}
