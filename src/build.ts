@@ -67,14 +67,16 @@ export function buildPlist(value: PlistValue, options: BuildPlistOptions & { for
 export function buildPlist(value: PlistValue, options?: BuildPlistOptions): string | Uint8Array;
 export function buildPlist(value: PlistValue, options: BuildPlistOptions = {}): string | Uint8Array {
   const format = options.format ?? "xml";
-  const indent = options.indent;
   switch (format) {
+    // The text builders receive the whole options object. Their option
+    // shapes are a structural subset of BuildPlistOptions, and forwarding
+    // as-is keeps the dispatch free of per-call allocations.
     case "xml":
-      return buildXmlPlist(value, indent === undefined ? {} : { indent });
+      return buildXmlPlist(value, options);
     case "binary":
       return buildBinaryPlist(value);
     case "openstep":
-      return buildOpenStepPlist(value, indent === undefined ? {} : { indent });
+      return buildOpenStepPlist(value, options);
     default: {
       // The satisfies check keeps the switch exhaustive at compile time
       // while the throw covers JavaScript callers the compiler cannot see.

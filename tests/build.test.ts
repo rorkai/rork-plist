@@ -257,7 +257,9 @@ describe("format selection", () => {
   test("forwards indentation to the text formats", () => {
     const value = { name: "Rork" };
 
-    expect(buildPlist(value, { format: "openstep", indent: false })).toBe(buildOpenStepPlist(value, { indent: false }));
+    expect(buildPlist(value, { format: "openstep", indent: false })).toBe(
+      buildOpenStepPlist(value, { indent: false }),
+    );
     expect(buildPlist(value, { format: "binary", indent: false })).toBeInstanceOf(Uint8Array);
   });
 
