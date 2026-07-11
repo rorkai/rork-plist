@@ -128,10 +128,10 @@ buildPlist(archive, { format: "binary" }); // bplist00 bytes
 
 Options:
 
-| Option   | Default | Description                                                                                       |
-| -------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `format` | `"xml"` | The serialization format: `"xml"`, `"binary"`, or `"openstep"`.                                   |
-| `indent` | `"\t"`  | Indentation unit for the text formats, or `false` for a single-line body. Binary has no layout.   |
+| Option   | Default | Description                                                                                     |
+| -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `format` | `"xml"` | The serialization format: `"xml"`, `"binary"`, or `"openstep"`.                                 |
+| `indent` | `"\t"`  | Indentation unit for the text formats, or `false` for a single-line body. Binary has no layout. |
 
 A dictionary key whose value is `undefined` is omitted, matching `JSON.stringify`, so optional and conditionally-set fields need no manual stripping. `PlistBuildError` names the path of the offending value (for example `$.profiles[2].name`) when a value has no representation in the chosen format — see each format's builder below for its specific restrictions.
 
